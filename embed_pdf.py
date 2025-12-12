@@ -152,8 +152,8 @@ def parse_args():
         help="Directory to write Parquet metadata and FAISS index."
     )
     p.add_argument(
-        "--min_chars", type=int, default=1500,
-        help="Minimum characters per chunk (default: 1500)."
+        "--min_chars", type=int, default=500,
+        help="Minimum characters per chunk (default: 500)."
     )
     return p.parse_args()
 
