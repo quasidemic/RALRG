@@ -51,6 +51,36 @@ def _auto_cutoff_min_k(
     return min(len(sorted_scores), min_k)
 
 
+def _candidate_cutoffs(
+    sorted_scores: np.ndarray,
+    max_elbow_rank: int,
+    min_drop_abs: float,
+) -> list[int]:
+    """
+    Produce candidate cutoffs (n_keep) ordered by drop magnitude, preferring
+    drops above the threshold, then the rest, and finally the full length.
+    """
+    diffs = sorted_scores[:-1] - sorted_scores[1:]
+    limit = min(len(diffs), max_elbow_rank)
+    if limit == 0:
+        return [min(len(sorted_scores), 1)]
+
+    indexed_drops = [(float(drop), i + 1) for i, drop in enumerate(diffs[:limit])]
+    indexed_drops.sort(key=lambda x: x[0], reverse=True)
+
+    candidates: list[int] = []
+    for drop, n_keep in indexed_drops:
+        if drop >= min_drop_abs and n_keep not in candidates:
+            candidates.append(n_keep)
+    for _, n_keep in indexed_drops:
+        if n_keep not in candidates:
+            candidates.append(n_keep)
+
+    if len(sorted_scores) not in candidates:
+        candidates.append(len(sorted_scores))
+    return candidates
+
+
 # ----------------------------- load index + metadata ----------------------------- #
 def load_index(parquet_path: str, faiss_index_path: str):
     """
@@ -176,8 +206,8 @@ def open_results_in_browser(hits: list[dict]) -> None:
 # ----------------------------- GPT summary ----------------------------- #
 def _build_summary_prompt(
     hits: list[dict],
-    query_text: str | None,
-    custom_prompt_text: str | None = None,
+    query_text: Optional[str],
+    custom_prompt_text: Optional[str] = None,
 ) -> str:
     preface1 = """
         Create a summary of the research article text chunks below, grouping chunks according to similar findings, approaches, models, assumptions, population or other relevant grouping. Base the relevant grouping on this query: 
@@ -191,7 +221,7 @@ def _build_summary_prompt(
         return " No hits to summarize."
 
     if custom_prompt_text:
-        parts = [custom_prompt_text, "hits = ["]
+        parts = [custom_prompt_text, preface2, "hits = ["]
     else:
         parts = [preface1, query_text or "", preface2, "hits = ["]
 
@@ -208,9 +238,9 @@ def _build_summary_prompt(
 
 def summarize_with_gpt(
     hits: list[dict],
-    query_text: str | None,
+    query_text: Optional[str],
     model: str = "gpt-4o-mini",
-    custom_prompt_text: str | None = None,
+    custom_prompt_text: Optional[str] = None,
 ) -> str:
     prompt = _build_summary_prompt(hits, query_text, custom_prompt_text=custom_prompt_text)
     try:
@@ -346,44 +376,55 @@ def most_similar_chunks_auto(
         n_to_return = min(top_k, len(sorted_scores))
     else:
         assert min_k is not None  # For type checkers; validated above.
-        n_to_return = _auto_cutoff_min_k(
+        candidates = _candidate_cutoffs(
             sorted_scores,
-            min_k=min_k,
             max_elbow_rank=max_elbow_rank,
             min_drop_abs=min_drop_abs,
         )
 
-    chosen_scores = sorted_scores[:n_to_return]
-    chosen_idxs = sorted_idxs[:n_to_return]
+    def _build_results(n_keep: int) -> list[dict]:
+        chosen_scores = sorted_scores[:n_keep]
+        chosen_idxs = sorted_idxs[:n_keep]
 
-    # Collect raw results prior to per-file limiting
-    raw_results = []
-    for score, vid in zip(chosen_scores, chosen_idxs):
-        row = df_meta.loc[int(vid)]
-        raw_results.append(
-            {
-                "vector_id": int(vid),
-                "filename": row["filename"],
-                "chunk": row["chunk"],
-                "score": float(score),
-            }
-        )
+        raw_results = []
+        for score, vid in zip(chosen_scores, chosen_idxs):
+            row = df_meta.loc[int(vid)]
+            raw_results.append(
+                {
+                    "vector_id": int(vid),
+                    "filename": row["filename"],
+                    "chunk": row["chunk"],
+                    "score": float(score),
+                }
+            )
 
-    if filter_noisy:
-        raw_results = [r for r in raw_results if not is_noisy_chunk(r["chunk"])]
+        if filter_noisy:
+            raw_results = [r for r in raw_results if not is_noisy_chunk(r["chunk"])]
 
-    # Keep at most three highest-scoring chunks per filename
-    limited_by_file: dict[str, list[dict]] = {}
-    for r in raw_results:
-        limited_by_file.setdefault(r["filename"], []).append(r)
-    for fname, items in limited_by_file.items():
-        items.sort(key=lambda r: -r["score"])
-        limited_by_file[fname] = items[:3]
+        limited_by_file: dict[str, list[dict]] = {}
+        for r in raw_results:
+            limited_by_file.setdefault(r["filename"], []).append(r)
+        for fname, items in limited_by_file.items():
+            items.sort(key=lambda r: -r["score"])
+            limited_by_file[fname] = items[:3]
 
-    results = [r for items in limited_by_file.values() for r in items]
+        results_local = [r for items in limited_by_file.values() for r in items]
+        results_local.sort(key=lambda r: (r["filename"], r["vector_id"], -r["score"]))
+        return results_local
 
-    # Order by title, chunk id, then similarity (desc) for easier reading
-    results.sort(key=lambda r: (r["filename"], r["vector_id"], -r["score"]))
+    if top_k is not None:
+        results = _build_results(n_to_return)
+    else:
+        assert min_k is not None
+        chosen_results: list[dict] = []
+        last_results: list[dict] = []
+        for n_keep in candidates:
+            candidate_results = _build_results(n_keep)
+            last_results = candidate_results
+            if len(candidate_results) >= min_k:
+                chosen_results = candidate_results
+                break
+        results = chosen_results if chosen_results else last_results
 
     return results
 
