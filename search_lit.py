@@ -1,8 +1,10 @@
 import argparse
 import html
 import os
+import re
 import tempfile
 import webbrowser
+import string
 from typing import Optional
 
 import numpy as np
@@ -15,8 +17,8 @@ import faiss
 def _auto_cutoff_min_k(
     sorted_scores: np.ndarray,
     min_k: int,
-    max_elbow_rank: int = 200,
-    min_drop_abs: float = 0.05,
+    max_elbow_rank: int = 1000,
+    min_drop_abs: float = 0.003,
 ) -> int:
     """
     Given scores sorted descending, find the largest drop that keeps >= min_k results.
@@ -172,19 +174,27 @@ def open_results_in_browser(hits: list[dict]) -> None:
 
 
 # ----------------------------- GPT summary ----------------------------- #
-def _build_summary_prompt(hits: list[dict], query_text) -> str:
+def _build_summary_prompt(
+    hits: list[dict],
+    query_text: str | None,
+    custom_prompt_text: str | None = None,
+) -> str:
     preface1 = """
         Create a summary of the research article text chunks below, grouping chunks according to similar findings, approaches, models, assumptions, population or other relevant grouping. Base the relevant grouping on this query: 
         """
     preface2 = """
-        Do not provide a summary for each chunk but provide summaries across several chunks according to the appropriate grouping.
+        Do not provide a summary for each chunk but provide summaries across several chunks according to the grouping.
         Include all citations for each grouping (article title with authors and years above chunk):
     """
 
     if not hits:
         return " No hits to summarize."
 
-    parts = [preface1, query_text, preface2, "hits = ["]
+    if custom_prompt_text:
+        parts = [custom_prompt_text, "hits = ["]
+    else:
+        parts = [preface1, query_text or "", preface2, "hits = ["]
+
     for h in hits:
         parts.append(
             f"TITLE: {h['filename']}\n"
@@ -196,8 +206,13 @@ def _build_summary_prompt(hits: list[dict], query_text) -> str:
     return "\n\n".join(parts)
 
 
-def summarize_with_gpt(hits: list[dict], query_text, model: str = "gpt-4o-mini") -> str:
-    prompt = _build_summary_prompt(hits, query_text)
+def summarize_with_gpt(
+    hits: list[dict],
+    query_text: str | None,
+    model: str = "gpt-4o-mini",
+    custom_prompt_text: str | None = None,
+) -> str:
+    prompt = _build_summary_prompt(hits, query_text, custom_prompt_text=custom_prompt_text)
     try:
         from openai import OpenAI  # type: ignore
     except ImportError as e:
@@ -222,6 +237,34 @@ def summarize_with_gpt(hits: list[dict], query_text, model: str = "gpt-4o-mini")
         return ""
 
 
+# ----------------------------- chunk filtering ----------------------------- #
+def is_noisy_chunk(
+    text: str,
+    char_threshold: float = 0.35,
+    token_threshold: float = 0.4,
+) -> bool:
+    """
+    Heuristic to detect bibliography/table-like chunks heavy on digits/brackets/punctuation.
+    Returns True if the chunk is considered noisy.
+    """
+    if not text:
+        return True
+
+    digits = sum(c.isdigit() for c in text)
+    brackets = sum(c in "[](){}<>/" for c in text)
+    punct = sum(c in string.punctuation for c in text)
+    total = len(text)
+    noise_ratio = (digits + brackets + punct) / max(total, 1)
+
+    tokens = re.findall(r"\S+", text)
+    numeric_tokens = sum(
+        1 for tok in tokens if sum(ch.isdigit() for ch in tok) >= max(2, len(tok) // 2)
+    )
+    token_noise_ratio = numeric_tokens / max(len(tokens), 1)
+
+    return noise_ratio > char_threshold or token_noise_ratio > token_threshold
+
+
 # ----------------------------- main search function ----------------------------- #
 def most_similar_chunks_auto(
     query_text: str,
@@ -231,8 +274,9 @@ def most_similar_chunks_auto(
     top_k: Optional[int] = None,
     min_k: Optional[int] = None,
     search_k: int = 1000,
-    max_elbow_rank: int = 200,
-    min_drop_abs: float = 0.05,
+    max_elbow_rank: int = 1000,
+    min_drop_abs: float = 0.003,
+    filter_noisy: bool = False,
 ):
     """
     Return similar chunks using FAISS + elbow logic.
@@ -257,6 +301,8 @@ def most_similar_chunks_auto(
         Search for a break only among top `max_elbow_rank` scores.
     min_drop_abs : float
         Minimum absolute drop in similarity to count as a meaningful break.
+    filter_noisy : bool
+        If True, drop bibliography/table-like chunks after cutoff selection.
 
     Returns
     -------
@@ -310,10 +356,11 @@ def most_similar_chunks_auto(
     chosen_scores = sorted_scores[:n_to_return]
     chosen_idxs = sorted_idxs[:n_to_return]
 
-    results = []
+    # Collect raw results prior to per-file limiting
+    raw_results = []
     for score, vid in zip(chosen_scores, chosen_idxs):
         row = df_meta.loc[int(vid)]
-        results.append(
+        raw_results.append(
             {
                 "vector_id": int(vid),
                 "filename": row["filename"],
@@ -321,6 +368,22 @@ def most_similar_chunks_auto(
                 "score": float(score),
             }
         )
+
+    if filter_noisy:
+        raw_results = [r for r in raw_results if not is_noisy_chunk(r["chunk"])]
+
+    # Keep at most three highest-scoring chunks per filename
+    limited_by_file: dict[str, list[dict]] = {}
+    for r in raw_results:
+        limited_by_file.setdefault(r["filename"], []).append(r)
+    for fname, items in limited_by_file.items():
+        items.sort(key=lambda r: -r["score"])
+        limited_by_file[fname] = items[:3]
+
+    results = [r for items in limited_by_file.values() for r in items]
+
+    # Order by title, chunk id, then similarity (desc) for easier reading
+    results.sort(key=lambda r: (r["filename"], r["vector_id"], -r["score"]))
 
     return results
 
@@ -335,7 +398,9 @@ def parse_args():
         help="Directory containing chunks.parquet and chunks.index.",
         default="/home/ubuntu/ragstuff/output/pdf_embedded"
     )
-    p.add_argument("--query", required=True, help="Query string.")
+    query_group = p.add_mutually_exclusive_group(required=True)
+    query_group.add_argument("--query", help="Query string.")
+    query_group.add_argument("--query_txt", help="Path to a text file containing the query.")
     p.add_argument(
         "--open_browser",
         action="store_true",
@@ -351,6 +416,10 @@ def parse_args():
         default="gpt-5-mini",
         help="OpenAI chat model to use when --prompt_gpt is set.",
     )
+    p.add_argument(
+        "--custom_prompt",
+        help="Path to a text file used as the GPT summary prompt instead of the default.",
+    )
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--top_k", type=int, help="Return exactly this many results.")
     group.add_argument(
@@ -358,20 +427,47 @@ def parse_args():
         type=int,
         help="Use largest-drop cutoff but return at least this many results.",
     )
-    p.add_argument("--search_k", type=int, default=1000, help="FAISS k.")
+    p.add_argument("--search_k", type=int, default=2000, help="FAISS k.")
     p.add_argument("--min_drop_abs", type=float, default=0.003, help="Break sensitivity.")
+    p.add_argument(
+        "--filter_noisy_chunks",
+        action="store_true",
+        help="Drop bibliography/table-like chunks (heavy digits/brackets/punctuation).",
+    )
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
+    # Resolve query text from direct input or file
+    if args.query_txt:
+        try:
+            with open(args.query_txt, "r", encoding="utf-8") as f:
+                query_text = f.read().strip()
+        except OSError as e:
+            raise SystemExit(f"Failed to read query_txt file: {e}")
+        if not query_text:
+            raise SystemExit("Query text file is empty.")
+    else:
+        query_text = args.query
+
+    custom_prompt_text = None
+    if args.custom_prompt:
+        try:
+            with open(args.custom_prompt, "r", encoding="utf-8") as f:
+                custom_prompt_text = f.read().strip()
+        except OSError as e:
+            raise SystemExit(f"Failed to read custom_prompt file: {e}")
+        if not custom_prompt_text:
+            raise SystemExit("Custom prompt file is empty.")
+
     # Load metadata + index + model
     df_meta, index = load_index_from_dir(args.input_dir)
     model = SentenceTransformer("thenlper/gte-large")
 
     hits = most_similar_chunks_auto(
-        query_text=args.query,
+        query_text=query_text,
         df_meta=df_meta,
         index=index,
         model=model,
@@ -379,7 +475,12 @@ if __name__ == "__main__":
         min_k=args.min_k,
         search_k=args.search_k,
         min_drop_abs=args.min_drop_abs,
+        filter_noisy=args.filter_noisy_chunks,
     )
+
+    chunk_count = len(hits)
+    title_count = len({h["filename"] for h in hits})
+    print(f"Chunks returned: {chunk_count} | Unique article titles: {title_count}")
 
     if args.open_browser:
         open_results_in_browser(hits)
@@ -393,7 +494,13 @@ if __name__ == "__main__":
 
     if args.prompt_gpt:
         try:
-            summary = summarize_with_gpt(hits, query_text=args.query, model=args.gpt_model)
+            summary_query = None if custom_prompt_text else query_text
+            summary = summarize_with_gpt(
+                hits,
+                query_text=summary_query,
+                model=args.gpt_model,
+                custom_prompt_text=custom_prompt_text,
+            )
             print("\n=== GPT SUMMARY ===")
             print(summary)
         except Exception as e:
