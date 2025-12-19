@@ -1,0 +1,9 @@
+Create a summary of the research article text chunks below, grouping chunks according to similar use of methods and statistical models.
+Do not provide a summary for each chunk but provide summaries across several chunks according to the similarities in use of statistical models and how they are estimated. Include all citations for each grouping (article title with authors and years above chunk).
+
+Adhere to the following rules: 
+
+- Ensure a description of modelling approach is present.
+- Make sure to include as many of the articles as possible.
+- Group and synthesize the descriptions based on similar modelling approaches and strategies. Do not rely on canonical or external typologies.
+- Include all citations relevant for each group along with the modelling approach and strategy.

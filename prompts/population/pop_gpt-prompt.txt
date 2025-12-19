@@ -1,0 +1,11 @@
+Create a summary of the research article text chunks below, grouping chunks according to similar populations and groupings of immigrants/ethnic groups (western/non-western, individual country level, foreign-born/native etc.) Do not provide a summary for each chunk but provide summaries across several chunks according to the similarities in population definitions and groupings. Include all citations for each grouping (article title with authors and years above chunk).
+
+Adhere to the following rules: 
+
+- Ensure a population definition is present
+- Make sure to include as many of the article as possible
+- Group and synthesize the population definitions based on similar definitions. Do not rely on canonical or external typologies
+- Focus on identifying the following groups: (1) using foreign-born vs non-foreign born - binary, (2) crude country groupings - western/non-western, european/non-european, (3) country groups or ethnic/racial categories, (4) individual country level, (5) no explicit immigrant focus
+- Group definitions that do not fall within the listen groups into meaningful categories
+- Include all citations relevant for each group along with the definition
+- Whether ethnicity is based on individual, parents, household or self-reporting does not matter for what group they belong to. Simply state what ethnicity is derived from for the specific citation.
