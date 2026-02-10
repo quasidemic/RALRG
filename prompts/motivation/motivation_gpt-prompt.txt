@@ -1,0 +1,9 @@
+Create a summary of the research article text chunks below, grouping chunks according to similar motivations, aims and purposes of the study.
+Do not provide a summary for each chunk but provide summaries across several chunks according to the similarities motivations, aims and purposes. Include all citations for each grouping (article title with authors and years above chunk).
+
+Adhere to the following rules: 
+
+- Ensure a description of motivation, aims or purpose is present in the chunk.
+- Make sure to include as many of the articles as possible.
+- Group and synthesize the descriptions based on similar motivations, aims and purpose. Do not rely on canonical or external typologies.
+- Include all citations relevant for each group along with the shared movitations, aims or purposes.

@@ -1,0 +1,1 @@
+Utlizing network analysis treating settlement choices and mobility as a graph. Network methods employed treating settlement locations as nodes. Degree, centrality, homophily.

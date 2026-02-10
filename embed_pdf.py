@@ -13,7 +13,7 @@ import faiss
 # ----------------------------- text utilities ----------------------------- #
 def clean_pdf_text(text: str) -> str:
     # Remove hyphenation at line breaks and normalize whitespace
-    text = text.replace("-\n", "")
+    text = text.replace("-\n", " ")
     text = text.replace("\r", " ")
     text = text.replace("\n", " ")
     while "  " in text:
@@ -40,7 +40,7 @@ def chunk_text_with_pysbd(
     sentences = segmenter.segment(text)
 
     chunks = []
-    current = ""
+    current = " "
 
     for sent in sentences:
         sent = sent.strip()
@@ -53,7 +53,7 @@ def chunk_text_with_pysbd(
             current = candidate
         else:
             chunks.append(candidate.strip())
-            current = ""
+            current = " "
 
     if current:
         chunks.append(current.strip())

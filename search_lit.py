@@ -303,6 +303,7 @@ def most_similar_chunks_auto(
     model: SentenceTransformer,
     top_k: Optional[int] = None,
     min_k: Optional[int] = None,
+    score_cutoff: Optional[float] = None,
     search_k: int = 1000,
     max_elbow_rank: int = 1000,
     min_drop_abs: float = 0.003,
@@ -325,6 +326,9 @@ def most_similar_chunks_auto(
         If set, return exactly the top_k most similar chunks.
     min_k : int | None
         If set, use the largest-drop cutoff but never return fewer than min_k chunks.
+        Ignored when score_cutoff is provided.
+    score_cutoff : float | None
+        If set, keep only chunks with similarity >= score_cutoff. Overrides min_k.
     search_k : int
         Number of neighbors to ask FAISS for (should be >= desired return count).
     max_elbow_rank : int
@@ -339,11 +343,14 @@ def most_similar_chunks_auto(
     results : list of dict
         Each dict: {"vector_id", "filename", "chunk", "score"}.
     """
-    if (top_k is None and min_k is None) or (top_k is not None and min_k is not None):
-        raise ValueError("Specify exactly one of top_k or min_k.")
+    use_cutoff = score_cutoff is not None
+
+    if not use_cutoff:
+        if (top_k is None and min_k is None) or (top_k is not None and min_k is not None):
+            raise ValueError("Specify exactly one of top_k or min_k.")
     if top_k is not None and top_k <= 0:
         raise ValueError("top_k must be positive.")
-    if min_k is not None and min_k <= 0:
+    if min_k is not None and min_k <= 0 and not use_cutoff:
         raise ValueError("min_k must be positive.")
 
     if index.ntotal == 0:
@@ -372,7 +379,18 @@ def most_similar_chunks_auto(
     sorted_scores = sims[order]
     sorted_idxs = idxs[order]
 
-    if top_k is not None:
+    if use_cutoff:
+        mask = sorted_scores >= float(score_cutoff)
+        sorted_scores = sorted_scores[mask]
+        sorted_idxs = sorted_idxs[mask]
+
+        if len(sorted_scores) == 0:
+            return []
+
+        n_to_return = len(sorted_scores)
+        if top_k is not None:
+            n_to_return = min(top_k, n_to_return)
+    elif top_k is not None:
         n_to_return = min(top_k, len(sorted_scores))
     else:
         assert min_k is not None  # For type checkers; validated above.
@@ -412,7 +430,9 @@ def most_similar_chunks_auto(
         results_local.sort(key=lambda r: (r["filename"], r["vector_id"], -r["score"]))
         return results_local
 
-    if top_k is not None:
+    if use_cutoff:
+        results = _build_results(n_to_return)
+    elif top_k is not None:
         results = _build_results(n_to_return)
     else:
         assert min_k is not None
@@ -461,12 +481,17 @@ def parse_args():
         "--custom_prompt",
         help="Path to a text file used as the GPT summary prompt instead of the default.",
     )
-    group = p.add_mutually_exclusive_group(required=True)
+    group = p.add_mutually_exclusive_group(required=False)
     group.add_argument("--top_k", type=int, help="Return exactly this many results.")
     group.add_argument(
         "--min_k",
         type=int,
         help="Use largest-drop cutoff but return at least this many results.",
+    )
+    p.add_argument(
+        "--score_cutoff",
+        type=float,
+        help="Keep only chunks with similarity >= this score. Overrides --min_k when set.",
     )
     p.add_argument("--search_k", type=int, default=2000, help="FAISS k.")
     p.add_argument("--min_drop_abs", type=float, default=0.003, help="Break sensitivity.")
@@ -475,7 +500,10 @@ def parse_args():
         action="store_true",
         help="Drop bibliography/table-like chunks (heavy digits/brackets/punctuation).",
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if args.top_k is None and args.min_k is None and args.score_cutoff is None:
+        p.error("Specify at least one of --top_k, --min_k, or --score_cutoff.")
+    return args
 
 
 if __name__ == "__main__":
@@ -514,6 +542,7 @@ if __name__ == "__main__":
         model=model,
         top_k=args.top_k,
         min_k=args.min_k,
+        score_cutoff=args.score_cutoff,
         search_k=args.search_k,
         min_drop_abs=args.min_drop_abs,
         filter_noisy=args.filter_noisy_chunks,
