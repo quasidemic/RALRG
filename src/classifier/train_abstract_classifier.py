@@ -1,4 +1,7 @@
 import os
+from os.path import join
+import json
+from pathlib import Path
 import random
 import uuid
 
@@ -10,69 +13,26 @@ import pysbd
 from datasets import Dataset
 from setfit import SetFitModel, Trainer, TrainingArguments
 
+from utils.train import synthesize_other_texts
 
 # -------------------------------------------------------------------
 # Configuration
 # -------------------------------------------------------------------
-CSV_PATH = "/home/ubuntu/ragstuff/data/train-data.csv"
+PROJECT_DIR = Path(os.environ["PROJECT_DIR"])
+
+CSV_PATH = PROJECT_DIR / "data" / "intminet" / "training_data" / "train-data.csv"
 
 TEXT_COLUMN = "Abstract Note"
 LABEL_COLUMN = "label"
 KEY_COLUMN = "Key"
 CATEGORY_COLUMN = "category"
+TEXT_FIELD = "text"
 
 # Hugging Face embedding model
 EMBEDDING_MODEL_ID = "thenlper/gte-large"
 
 # Output directory for the trained model
-OUTPUT_DIR = "./models/gte-large_abstracts"
-
-TEXT_FIELD = "text"
-
-
-def synthesize_other_texts(df: pd.DataFrame, seed: int) -> pd.DataFrame:
-    """
-    Upscale 'other' label by creating synthetic texts composed of random segments
-    from existing 'other' samples. Each synthetic text uses the mean sentence count
-    of the existing 'other' texts as its length.
-    """
-    other_df = df[df[LABEL_COLUMN] == "other"]
-    relevant_count = len(df[df[LABEL_COLUMN] == "relevant"])
-    other_count = len(other_df)
-
-    # Only generate when we have fewer 'other' samples than 'relevant' samples
-    samples_needed = relevant_count - other_count
-    if samples_needed <= 0 or other_df.empty:
-        return df
-
-    segmenter = pysbd.Segmenter(language="en", clean=True)
-    sentence_pool = []
-    sentence_counts = []
-    for text in other_df[TEXT_FIELD]:
-        segments = segmenter.segment(text)
-        if segments:
-            sentence_pool.extend(segments)
-            sentence_counts.append(len(segments))
-
-    if not sentence_pool or not sentence_counts:
-        return df
-
-    mean_sentences = max(1, round(sum(sentence_counts) / len(sentence_counts)))
-    rng = random.Random(seed)
-    synthetic_rows = []
-
-    for _ in range(samples_needed):
-        chosen_segments = [rng.choice(sentence_pool) for _ in range(mean_sentences)]
-        synthetic_rows.append(
-            {
-                KEY_COLUMN: f"synthetic-other-{uuid.uuid4().hex[:8]}",
-                TEXT_FIELD: " ".join(chosen_segments),
-                LABEL_COLUMN: "other",
-            }
-        )
-
-    synthetic_df = pd.DataFrame(synthetic_rows, columns=[KEY_COLUMN, TEXT_FIELD, LABEL_COLUMN])
-    return pd.concat([df, synthetic_df], ignore_index=True)
+OUTPUT_DIR = PROJECT_DIR / "models" / "gte-large_abstracts"
 
 
 def main(seed_use=1764933039): # Unix Epoch 2025-12-05 12:10

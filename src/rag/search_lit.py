@@ -449,7 +449,7 @@ def most_similar_chunks_auto(
     return results
 
 
-# ----------------------------- CLI example ----------------------------- #
+# ----------------------------- CLI ----------------------------- #
 def parse_args():
     p = argparse.ArgumentParser(
         description="Search most similar chunks in FAISS + Parquet index."
