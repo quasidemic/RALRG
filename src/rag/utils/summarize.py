@@ -1,7 +1,9 @@
+import json
 import html
 import os
 import tempfile
 import webbrowser
+from pathlib import Path
 from typing import Optional
 
 
@@ -19,6 +21,16 @@ def print_hits(hits: list[dict]) -> None:
         print(h["chunk"])
         print("-" * 80)
 
+def store_as_json(hits: list[dict], infotype, output_dir: str | os.PathLike) -> None:
+    
+    output_path = Path(output_dir) / f"relevant_chunks_{infotype}.jsonl"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for hit in hits:
+            if not isinstance(hit, dict):
+                raise TypeError("store_as_json expects a list of dict records.")
+            f.write(json.dumps(hit, ensure_ascii=False) + "\n")
 
 def _hits_to_html(hits: list[dict]) -> str:
     rows = []
