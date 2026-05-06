@@ -1,13 +1,15 @@
 import os
 import glob
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 import faiss
 
-from text_utils import *
+from text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
 
+API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ----------------------------- main pipeline ----------------------------- #
 def process_pdfs(
@@ -50,6 +52,95 @@ def process_pdfs(
         emb = emb.astype("float32")
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         emb = emb / np.clip(norms, 1e-12, None)
+
+        all_embeddings.append(emb)
+
+        n = emb.shape[0]
+        for i in range(n):
+            records.append(
+                {
+                    "vector_id": vector_id,
+                    "filename": filename,
+                    "chunk": chunks[i],
+                }
+            )
+            vector_id += 1
+
+    if not records:
+        raise RuntimeError("No chunks/embeddings created.")
+
+    # Stack all embeddings: shape (N, d)
+    emb_matrix = np.vstack(all_embeddings)
+    n, d = emb_matrix.shape
+    print(f"Built embeddings matrix: {n} vectors of dim {d}")
+
+    # Build FAISS index (inner product on normalized vectors ~ cosine)
+    index = faiss.IndexFlatIP(d)
+    index.add(emb_matrix)
+    print(f"FAISS index size: {index.ntotal}")
+
+    # Save FAISS index
+    faiss.write_index(index, faiss_index_path)
+    print(f"Saved FAISS index to: {faiss_index_path}")
+
+    # Save metadata to Parquet
+    df = pd.DataFrame(records, columns=["vector_id", "filename", "chunk"])
+    df.to_parquet(parquet_path, index=False)
+    print(f"Saved metadata to Parquet: {parquet_path}")
+
+
+# processor with openai embeddings
+def process_pdfs_openai(
+    input_dir: str,
+    output_dir: str,
+    chunk_size: int = 300,
+    chunk_overlap: int = 60,
+    model_name="text-embedding-3-large"
+    ):
+
+    # Check for API key
+    if not API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set in environment.")
+
+    # Paths to output files
+    parquet_path = Path(output_dir) / "chunks.parquet"
+    faiss_index_path = Path(output_dir) / "chunks.index"
+
+    parquet_path.mkdir(parents=True, exist_ok=True)
+    faiss_index_path.mkdir(parents=True, exist_ok=True)
+
+    # Lists for results
+    records = []
+    all_embeddings = []
+    vector_id = 0
+
+    # Derive paths
+    pdf_paths = sorted(glob.glob(Path(input_dir) / "*.pdf"))
+    if not pdf_paths:
+        raise FileNotFoundError(f"No PDFs found in: {input_dir}")
+
+    # iter over paths
+    for pdf_path in pdf_paths:
+        filename = os.path.basename(pdf_path)
+        print(f"Processing: {filename}")
+
+        text = extract_text_from_pdf(pdf_path)
+        if not text:
+            print(f"  Skipping (no text): {filename}")
+            continue
+
+        chunks = chunk_text_with_langchain(
+            text, 
+            chunk_size = chunk_size,
+            chunk_overlap = chunk_overlap
+            )
+
+        if not chunks:
+            print(f"Skipping: {filename} (no chunks)")
+            continue
+
+        # Embed with openAI embedding model
+        #TODO: Implement embedding of chunks - normalized?
 
         all_embeddings.append(emb)
 

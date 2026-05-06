@@ -4,3 +4,5 @@ models
 output
 *.out
 openaikey.txt
+*.zip
+*__pycache__*
