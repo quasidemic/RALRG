@@ -1,0 +1,102 @@
+import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+env_path = Path("/home/ubuntu/ragstuff/.env")
+load_dotenv(env_path)
+
+SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
+
+def _produce_prompt(type):
+
+    with open(SCHEMA_PATH, "r") as f:
+        schemas = json.load(f)
+
+    if type not in schemas.keys():
+        raise ValueError(f"Invalid type input: {type}. Expected one of {', '.join(schemas.keys())}")
+
+    schema_use = schemas.get("global").get("extraction_schema") | (schemas.get(type).get("extraction_schema"))
+
+    prompt = f"""
+    You are extracting {type} information for a literature review.
+
+    Use only the provided chunks below.
+
+    Return JSON records using this schema:
+    {schema_use}
+
+    Rules:
+    - Do not infer beyond the text.
+    - Always include the filename where the record is from (located just above chunk) (field: "paper_filename").
+    - Use null if the field is not present.
+    - Keep records separated by claim: one record per unique information.
+    - Include supporting chunk IDs for every extracted claim (field: "supporting_chunk_ids").
+    - Include quotes/snippets from the chunk supporting the claim in the record (field: "supporting_quotes").
+    - If applicable, include the citations appearing that pertain to the claim (field: "citations_used").
+    - If multiple chunks describe support the same claim, combine them into one record.
+    - Strictly return the JSON records. No lead-in or summarizing text surrounding records. Response has to be a valid JSON.
+    """
+
+    return(prompt)
+
+def _build_full_prompt(
+    hits, 
+    type,
+    custom_prompt_text=None
+    ):
+    
+    if not hits:
+        return "No hits to summarize."
+
+    prompt_text = _produce_prompt(type)
+
+    chunk_parts = []
+    for h in hits:
+        chunk_parts.append(
+            f"FILENAME: {h['filename']}\n"
+            f"CHUNK:\n{h['chunk']}\n"
+            "-----"
+        )
+    
+    if custom_prompt_text:
+        parts = [prompt_text, custom_prompt_text, "-----\nCHUNKS:\n-----", chunk_parts]
+    else:
+        parts = [prompt_text, "-----\nCHUNKS:\n-----", chunk_parts]
+
+    full_prompt = "\n\n".join(parts)
+
+    return full_prompt
+
+
+def produce_records(
+    hits,
+    type,
+    model = "gpt-5.4-nano",
+    custom_prompt_text=None
+    ):
+
+    prompt = _build_full_prompt(hits, type, custom_prompt_text)
+
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("openai package not installed; pip install openai") from e
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set in environment.")
+
+    client = OpenAI(api_key=api_key)
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
+
+    try:
+        return resp.choices[0].message.content or {}
+    except Exception:
+        return {}
