@@ -55,14 +55,16 @@ def _build_full_prompt(
     for h in hits:
         chunk_parts.append(
             f"FILENAME: {h['filename']}\n"
+            f"CHUNK_ID: {h.get('vector_id')}\n"
             f"CHUNK:\n{h['chunk']}\n"
             "-----"
         )
+    chunks_text = "\n\n".join(chunk_parts)
     
     if custom_prompt_text:
-        parts = [prompt_text, custom_prompt_text, "-----\nCHUNKS:\n-----", chunk_parts]
+        parts = [prompt_text, custom_prompt_text, "-----\nCHUNKS:\n-----", chunks_text]
     else:
-        parts = [prompt_text, "-----\nCHUNKS:\n-----", chunk_parts]
+        parts = [prompt_text, "-----\nCHUNKS:\n-----", chunks_text]
 
     full_prompt = "\n\n".join(parts)
 
