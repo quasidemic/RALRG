@@ -1,0 +1,44 @@
+{
+    "global": {
+        "extraction_schema": {
+            "paper_filename": "",
+            "supporting_quotes": [],
+            "supporting_chunk_ids": [],
+            "citations_used": []
+        }
+    },
+    "theory": {
+        "query": "",
+        "query_terms": [
+            "theory",
+            "theories",
+            "theoretical",
+            "model",
+            "mechanism", 
+            "concept",
+            "hypothes",
+            "pattern",
+            "determinants",
+            "framework",
+            "analytic",
+            "approach",
+            "relationship"
+        ],
+        "extraction_schema": {
+            "theory_or_framework": "",
+            "core_concept": "",
+            "concept_definition": "",
+            "framed_as_complementary_with": "",
+            "framed_as_competing_with": "",
+            "used_for": [
+                "generating hypotheses",
+                "framing interpretation",
+                "defining key concepts",
+                "explaining mechanism",
+                "guiding measurement",
+                "critiquing prior work",
+                "purely background or framing"
+            ]
+        }
+    }
+}
