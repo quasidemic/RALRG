@@ -1,5 +1,27 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+import json
 
+env_path = Path("/home/ubuntu/ragstuff/.env")
+load_dotenv(env_path)
+
+SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
+
+def load_queries(type):
+    with open(SCHEMA_PATH, "r") as f:
+        schemas = json.load(f)
+
+    if type not in schemas.keys():
+        raise ValueError(f"Invalid type input: {type}. Expected one of {', '.join(schemas.keys())}")
+
+    schema = schemas.get(type)
+
+    query_use  = schema.get("query")
+    query_terms_use  = schema.get("query_terms")
+
+    return query_use, query_terms_use    
+    
 
 def read_text_file(path: str, description: str) -> str:
     """
