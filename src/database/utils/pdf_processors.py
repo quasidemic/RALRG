@@ -7,7 +7,7 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 import faiss
 
-from text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
+from .text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -102,12 +102,19 @@ def process_pdfs_openai(
     if not API_KEY:
         raise RuntimeError("OPENAI_API_KEY not set in environment.")
 
-    # Paths to output files
-    parquet_path = Path(output_dir) / "chunks.parquet"
-    faiss_index_path = Path(output_dir) / "chunks.index"
+    # Initialize client
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise RuntimeError("openai package not installed; pip install openai") from e
 
-    parquet_path.mkdir(parents=True, exist_ok=True)
-    faiss_index_path.mkdir(parents=True, exist_ok=True)
+    client = OpenAI(api_key=API_KEY)
+
+    # Paths to output files
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    parquet_path = output_path / "chunks.parquet"
+    faiss_index_path = output_path / "chunks.index"
 
     # Lists for results
     records = []
@@ -115,7 +122,7 @@ def process_pdfs_openai(
     vector_id = 0
 
     # Derive paths
-    pdf_paths = sorted(glob.glob(Path(input_dir) / "*.pdf"))
+    pdf_paths = sorted(glob.glob(os.path.join(input_dir, "*.pdf")))
     if not pdf_paths:
         raise FileNotFoundError(f"No PDFs found in: {input_dir}")
 
@@ -124,11 +131,13 @@ def process_pdfs_openai(
         filename = os.path.basename(pdf_path)
         print(f"Processing: {filename}")
 
+        # Extract text
         text = extract_text_from_pdf(pdf_path)
         if not text:
-            print(f"  Skipping (no text): {filename}")
+            print(f"Skipping: {filename} (no text)")
             continue
-
+        
+        # Split into chunks
         chunks = chunk_text_with_langchain(
             text, 
             chunk_size = chunk_size,
@@ -139,9 +148,13 @@ def process_pdfs_openai(
             print(f"Skipping: {filename} (no chunks)")
             continue
 
-        # Embed with openAI embedding model
-        #TODO: Implement embedding of chunks - normalized?
+        # Embed via openAI
+        response = client.embeddings.create(input=chunks, model=model_name)
+        emb = np.array([item.embedding for item in response.data], dtype="float32")
+        norms = np.linalg.norm(emb, axis=1, keepdims=True)
+        emb = emb / np.clip(norms, 1e-12, None)
 
+        # add to combined embeddings and records
         all_embeddings.append(emb)
 
         n = emb.shape[0]
@@ -169,7 +182,7 @@ def process_pdfs_openai(
     print(f"FAISS index size: {index.ntotal}")
 
     # Save FAISS index
-    faiss.write_index(index, faiss_index_path)
+    faiss.write_index(index, str(faiss_index_path))
     print(f"Saved FAISS index to: {faiss_index_path}")
 
     # Save metadata to Parquet
