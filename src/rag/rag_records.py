@@ -2,26 +2,9 @@ import argparse
 import json
 from pathlib import Path
 
-
-def load_jsonl_records(input_path: str | Path) -> list[dict]:
-    records = []
-    with Path(input_path).open("r", encoding="utf-8") as f:
-        for line_number, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            record = json.loads(line)
-            if not isinstance(record, dict):
-                raise ValueError(f"Line {line_number} is not a JSON object.")
-            records.append(record)
-    return records
-
-
-def write_records(records: str, output_path: str | Path) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(records, encoding="utf-8")
-
+from utils.loaders import load_jsonl_records
+from utils.prompter import produce_records
+from utils.summarize import write_records_txt, store_as_json
 
 def main():
     parser = argparse.ArgumentParser(
@@ -52,8 +35,6 @@ def main():
     )
     args = parser.parse_args()
 
-    from utils.prompter import produce_records
-
     hits = load_jsonl_records(args.input_jsonl)
 
     if args.first_k:
@@ -64,7 +45,11 @@ def main():
     records = produce_records(hits=hits[:k], type=args.infotype, model=args.model)
 
     if args.output_path:
-        write_records(records, args.output_path)
+        try:
+            store_as_json(records, args.output_path)
+        except ValueError as e:
+            print(f"Unable to store as json. Writing as txt: {e}")
+            write_records_txt(records, args.output_path)
     else:
         print(records)
 

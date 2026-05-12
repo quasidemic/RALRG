@@ -21,7 +21,19 @@ def load_queries(type):
     query_terms_use  = schema.get("query_terms")
 
     return query_use, query_terms_use    
-    
+
+def load_jsonl_records(input_path: str | Path) -> list[dict]:
+    records = []
+    with Path(input_path).open("r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise ValueError(f"Line {line_number} is not a JSON object.")
+            records.append(record)
+    return records
 
 def read_text_file(path: str, description: str) -> str:
     """

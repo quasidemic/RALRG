@@ -1,5 +1,5 @@
 import argparse
-
+from pathlib import Path
 
 def main():
 
@@ -115,8 +115,9 @@ def main():
 
     # Store as JSON records
     if args.output_dir:
+        output_path = Path(args.output_dir) / f"relevant_chunks_{args.infotype}.jsonl"
         
-        store_as_json(hits, args.infotype, args.output_dir)
+        store_as_json(hits, output_path)
 
 if __name__ == "__main__":
     main()

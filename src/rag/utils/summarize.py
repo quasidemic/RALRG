@@ -43,7 +43,7 @@ def store_as_json(hits: list[dict], output_path) -> None:
             f.write(json.dumps(hit, ensure_ascii=False) + "\n")
 
 def write_records_txt(records: str, output_path: str | Path) -> None:
-    output_path = Path(output_path)
+    output_path = Path(output_path).with_suffix(".txt")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(records, encoding="utf-8")
 
