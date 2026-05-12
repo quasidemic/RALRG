@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 
+## PRINTERS ##
+
 def print_hit_counts(hits: list[dict]) -> None:
     chunk_count = len(hits)
     title_count = len({h["filename"] for h in hits})
@@ -21,9 +23,17 @@ def print_hits(hits: list[dict]) -> None:
         print(h["chunk"])
         print("-" * 80)
 
-def store_as_json(hits: list[dict], infotype, output_dir: str | os.PathLike) -> None:
+def open_results_in_browser(hits: list[dict]) -> None:
+    html_content = _hits_to_html(hits)
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as f:
+        f.write(html_content)
+        tmp_path = f.name
+    webbrowser.open(f"file://{tmp_path}")
+    print(f"Opened results in browser: {tmp_path}")
+
+## WRITERS ##
+def store_as_json(hits: list[dict], output_path) -> None:
     
-    output_path = Path(output_dir) / f"relevant_chunks_{infotype}.jsonl"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as f:
@@ -32,6 +42,44 @@ def store_as_json(hits: list[dict], infotype, output_dir: str | os.PathLike) -> 
                 raise TypeError("store_as_json expects a list of dict records.")
             f.write(json.dumps(hit, ensure_ascii=False) + "\n")
 
+def write_records_txt(records: str, output_path: str | Path) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(records, encoding="utf-8")
+
+## SUMMARIZERS ## 
+def summarize_with_gpt(
+    hits: list[dict],
+    query_text: Optional[str],
+    model: str = "gpt-4o-mini",
+    custom_prompt_text: Optional[str] = None,
+) -> str:
+    prompt = _build_summary_prompt(hits, query_text, custom_prompt_text=custom_prompt_text)
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("openai package not installed; pip install openai") from e
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set in environment.")
+
+    client = OpenAI(api_key=api_key)
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
+
+    try:
+        return resp.choices[0].message.content or ""
+    except Exception:
+        return ""
+
+
+## HELPERS ##
 def _hits_to_html(hits: list[dict]) -> str:
     rows = []
     if not hits:
@@ -114,13 +162,7 @@ def _hits_to_html(hits: list[dict]) -> str:
 </html>"""
 
 
-def open_results_in_browser(hits: list[dict]) -> None:
-    html_content = _hits_to_html(hits)
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as f:
-        f.write(html_content)
-        tmp_path = f.name
-    webbrowser.open(f"file://{tmp_path}")
-    print(f"Opened results in browser: {tmp_path}")
+
 
 
 def _build_summary_prompt(
@@ -153,34 +195,3 @@ def _build_summary_prompt(
         )
     parts.append("]")
     return "\n\n".join(parts)
-
-
-def summarize_with_gpt(
-    hits: list[dict],
-    query_text: Optional[str],
-    model: str = "gpt-4o-mini",
-    custom_prompt_text: Optional[str] = None,
-) -> str:
-    prompt = _build_summary_prompt(hits, query_text, custom_prompt_text=custom_prompt_text)
-    try:
-        from openai import OpenAI  # type: ignore
-    except ImportError as e:
-        raise RuntimeError("openai package not installed; pip install openai") from e
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set in environment.")
-
-    client = OpenAI(api_key=api_key)
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except Exception as e:
-        raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
-
-    try:
-        return resp.choices[0].message.content or ""
-    except Exception:
-        return ""
