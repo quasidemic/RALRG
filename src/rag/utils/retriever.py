@@ -1,16 +1,18 @@
 import os
 import re
 import string
+from collections import Counter
 from typing import Any, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
+BM25_TOKEN_PATTERN = re.compile(r"\b\w+\b", re.UNICODE)
 
 def is_noisy_chunk(
     text: str,
-    char_threshold: float = 0.35,
+    char_threshold: float = 0.25,
     token_threshold: float = 0.4,
 ) -> bool:
     """
@@ -91,6 +93,7 @@ def _row_to_candidate(
     row: pd.Series,
     dense_score: float = 0.0,
     keyword_score: float = 0.0,
+    keyword_raw_score: float = 0.0,
 ) -> dict:
     return {
         "vector_id": int(vector_id),
@@ -99,6 +102,7 @@ def _row_to_candidate(
         "score": 0.0,
         "dense_score": float(dense_score),
         "keyword_score": float(keyword_score),
+        "keyword_raw_score": float(keyword_raw_score),
     }
 
 
@@ -157,41 +161,86 @@ def _dense_candidates(
     return candidates
 
 
-def _keyword_candidates(
+def _tokenize_bm25(text: str) -> list[str]:
+    return BM25_TOKEN_PATTERN.findall(str(text).casefold())
+
+
+def _bm25_query_tokens(query_terms: Sequence[str]) -> list[str]:
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for term in query_terms:
+        for token in _tokenize_bm25(term):
+            if token not in seen:
+                seen.add(token)
+                tokens.append(token)
+    return tokens
+
+
+def _bm25_candidates(
     query_terms: Sequence[str],
     df_meta: pd.DataFrame,
-    top_k: int,
+    top_k: Optional[int] = None,
+    k1: float = 1.5,
+    b: float = 0.75,
 ) -> dict[int, dict]:
-    terms = sorted({term.strip().casefold() for term in query_terms if term.strip()})
-    if not terms or df_meta.empty:
+    query_tokens = _bm25_query_tokens(query_terms)
+    if not query_tokens or df_meta.empty:
         return {}
 
-    chunks = df_meta["chunk"].fillna("").astype(str).str.casefold()
-    total_counts = np.zeros(len(chunks), dtype="float32")
-    matched_terms = np.zeros(len(chunks), dtype="float32")
-
-    for term in terms:
-        pattern = rf"\b{re.escape(term)}\w*"
-        counts = chunks.str.count(pattern).to_numpy(dtype="float32")
-        total_counts += counts
-        matched_terms += counts > 0
-
-    has_match = total_counts > 0
-    if not np.any(has_match):
+    if top_k is not None and top_k <= 0:
         return {}
 
-    frequency = np.log1p(total_counts)
-    max_frequency = float(np.max(frequency))
-    if max_frequency > 0:
-        frequency = frequency / max_frequency
+    documents = [_tokenize_bm25(chunk) for chunk in df_meta["chunk"].fillna("")]
+    doc_lengths = np.array([len(doc) for doc in documents], dtype="float32")
+    n_docs = len(documents)
+    if n_docs == 0:
+        return {}
 
-    coverage = matched_terms / max(len(terms), 1)
-    scores = (0.8 * coverage) + (0.2 * frequency)
+    avg_doc_length = float(np.mean(doc_lengths)) if np.any(doc_lengths) else 1.0
+    postings: dict[str, dict[int, int]] = {}
+    for doc_idx, document in enumerate(documents):
+        for token, count in Counter(document).items():
+            postings.setdefault(token, {})[doc_idx] = int(count)
 
-    matched_positions = np.flatnonzero(has_match)
+    scores = np.zeros(n_docs, dtype="float32")
+    for query_token in query_tokens:
+        matching_tokens = [
+            token
+            for token in postings
+            if token == query_token
+            or (len(query_token) >= 4 and token.startswith(query_token))
+        ]
+        if not matching_tokens:
+            continue
+
+        term_frequencies: dict[int, int] = {}
+        for token in matching_tokens:
+            for doc_idx, count in postings[token].items():
+                term_frequencies[doc_idx] = term_frequencies.get(doc_idx, 0) + count
+
+        doc_frequency = len(term_frequencies)
+        if doc_frequency == 0:
+            continue
+
+        idf = np.log1p((n_docs - doc_frequency + 0.5) / (doc_frequency + 0.5))
+        for doc_idx, term_frequency in term_frequencies.items():
+            denominator = term_frequency + k1 * (
+                1 - b + b * (float(doc_lengths[doc_idx]) / avg_doc_length)
+            )
+            scores[doc_idx] += float(
+                idf * ((term_frequency * (k1 + 1)) / max(denominator, 1e-12))
+            )
+
+    matched_positions = np.flatnonzero(scores > 0)
+    if len(matched_positions) == 0:
+        return {}
+
     matched_scores = scores[matched_positions]
-    order = np.argsort(-matched_scores)[:top_k]
+    order = np.argsort(-matched_scores)
+    if top_k is not None:
+        order = order[:top_k]
 
+    max_score = float(np.max(matched_scores))
     vector_ids = df_meta.index.to_numpy()
     candidates: dict[int, dict] = {}
     for pos in matched_positions[order]:
@@ -199,7 +248,8 @@ def _keyword_candidates(
         candidates[vector_id] = _row_to_candidate(
             vector_id,
             df_meta.iloc[pos],
-            keyword_score=float(scores[pos]),
+            keyword_score=float(scores[pos] / max_score) if max_score > 0 else 0.0,
+            keyword_raw_score=float(scores[pos]),
         )
 
     return candidates
@@ -222,6 +272,10 @@ def _merge_candidates(
             float(current.get("keyword_score", 0.0)),
             float(candidate.get("keyword_score", 0.0)),
         )
+        current["keyword_raw_score"] = max(
+            float(current.get("keyword_raw_score", 0.0)),
+            float(candidate.get("keyword_raw_score", 0.0)),
+        )
 
     results = []
     for candidate in merged.values():
@@ -233,7 +287,7 @@ def _merge_candidates(
         if candidate.get("dense_score", 0.0) > 0:
             sources.append("dense")
         if candidate.get("keyword_score", 0.0) > 0:
-            sources.append("keyword")
+            sources.append("bm25")
         candidate["retrieval_sources"] = sources
         results.append(candidate)
 
@@ -266,48 +320,57 @@ def _filter_and_deduplicate(candidates: list[dict], filter_noisy: bool) -> list[
     return results
 
 
-def _select_with_paper_coverage(
+def _adaptive_score_threshold(
+    scores: np.ndarray,
+    absolute_min_threshold: float,
+    threshold_percentile: float,
+    threshold_margin: float,
+    relative_score_margin: Optional[float],
+) -> float:
+    if len(scores) == 0:
+        return float("inf")
+
+    percentile_threshold = float(np.percentile(scores, threshold_percentile))
+    threshold = max(
+        float(absolute_min_threshold),
+        percentile_threshold - float(threshold_margin),
+    )
+
+    if relative_score_margin is not None:
+        threshold = max(threshold, float(np.max(scores)) - float(relative_score_margin))
+
+    return threshold
+
+
+def _select_with_adaptive_threshold(
     candidates: list[dict],
-    papers: Sequence[str],
-    top_k: int,
-    min_chunks_per_paper: int,
+    min_top_k: int,
+    max_chunks: int,
+    absolute_min_threshold: float,
+    threshold_percentile: float,
+    threshold_margin: float,
+    relative_score_margin: Optional[float],
 ) -> list[dict]:
-    if top_k <= 0:
-        raise ValueError("top_k must be positive.")
-    if min_chunks_per_paper < 0:
-        raise ValueError("min_chunks_per_paper must be non-negative.")
+    if not candidates:
+        return []
 
-    required = len(papers) * min_chunks_per_paper
-    if required > top_k:
-        raise ValueError(
-            "top_k must be at least the number of required paper-coverage chunks "
-            f"({required})."
-        )
+    scores = np.array([float(candidate["score"]) for candidate in candidates], dtype="float32")
+    threshold = _adaptive_score_threshold(
+        scores=scores,
+        absolute_min_threshold=absolute_min_threshold,
+        threshold_percentile=threshold_percentile,
+        threshold_margin=threshold_margin,
+        relative_score_margin=relative_score_margin,
+    )
 
-    selected: list[dict] = []
-    selected_ids: set[int] = set()
+    above_threshold_count = sum(
+        float(candidate["score"]) >= threshold and float(candidate["score"]) > 0
+        for candidate in candidates
+    )
+    floor_count = min(min_top_k, len(candidates))
+    n_to_keep = min(max(above_threshold_count, floor_count), max_chunks, len(candidates))
 
-    by_paper: dict[str, list[dict]] = {}
-    for candidate in candidates:
-        by_paper.setdefault(str(candidate["filename"]), []).append(candidate)
-
-    for paper in sorted(papers):
-        paper_candidates = by_paper.get(str(paper), [])
-        for candidate in paper_candidates[:min_chunks_per_paper]:
-            selected.append(candidate)
-            selected_ids.add(int(candidate["vector_id"]))
-
-    for candidate in candidates:
-        if len(selected) >= top_k:
-            break
-        vector_id = int(candidate["vector_id"])
-        if vector_id in selected_ids:
-            continue
-        selected.append(candidate)
-        selected_ids.add(vector_id)
-
-    selected.sort(key=lambda item: (str(item["filename"]), -item["score"], item["vector_id"]))
-    return selected
+    return candidates[:n_to_keep]
 
 
 def retrieve_rag_chunks_openai(
@@ -315,27 +378,54 @@ def retrieve_rag_chunks_openai(
     query_terms: Sequence[str],
     df_meta: pd.DataFrame,
     index: Any,
-    top_k: int = 150,
+    top_k: Optional[int] = None,
+    min_top_k: int = 30,
+    max_chunks: int = 300,
+    absolute_min_threshold: float = 0.0,
+    threshold_percentile: float = 90.0,
+    threshold_margin: float = 0.03,
+    relative_score_margin: Optional[float] = None,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     search_k: Optional[int] = None,
     keyword_k: Optional[int] = None,
     dense_weight: float = 0.75,
     keyword_weight: float = 0.25,
-    min_chunks_per_paper: int = 1,
+    min_chunks_per_paper: int = 0,
     filter_noisy: bool = True,
     client: Optional[Any] = None,
 ) -> list[dict]:
     """
-    Retrieve RAG chunks with OpenAI embeddings plus exact keyword matching.
+    Retrieve RAG chunks with OpenAI embeddings plus BM25 keyword matching.
 
-    The returned chunks are deduplicated, filtered for noisy chunks by default,
-    selected to include at least `min_chunks_per_paper` from every paper when
-    possible, and grouped by paper first, then descending similarity.
+    Selection keeps all chunks above a query-adaptive score threshold, enforces
+    `min_top_k` as a floor, and caps the final result set at `max_chunks`.
+    `top_k` is retained as a backwards-compatible alias for `min_top_k`; it is
+    not a final result cap.
     """
     if not query:
         raise ValueError("query must not be empty.")
-    if top_k <= 0:
-        raise ValueError("top_k must be positive.")
+    if top_k is not None:
+        if top_k <= 0:
+            raise ValueError("top_k must be positive.")
+        min_top_k = top_k
+    if min_top_k <= 0:
+        raise ValueError("min_top_k must be positive.")
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be positive.")
+    if max_chunks < min_top_k:
+        raise ValueError("max_chunks must be greater than or equal to min_top_k.")
+    if absolute_min_threshold < 0:
+        raise ValueError("absolute_min_threshold must be non-negative.")
+    if not 0 <= threshold_percentile <= 100:
+        raise ValueError("threshold_percentile must be between 0 and 100.")
+    if threshold_margin < 0:
+        raise ValueError("threshold_margin must be non-negative.")
+    if relative_score_margin is not None and relative_score_margin < 0:
+        raise ValueError("relative_score_margin must be non-negative.")
+    if search_k is not None and search_k <= 0:
+        raise ValueError("search_k must be positive.")
+    if keyword_k is not None and keyword_k <= 0:
+        raise ValueError("keyword_k must be positive.")
     if dense_weight < 0 or keyword_weight < 0:
         raise ValueError("dense_weight and keyword_weight must be non-negative.")
     if dense_weight == 0 and keyword_weight == 0:
@@ -354,47 +444,31 @@ def retrieve_rag_chunks_openai(
         client=client,
     )
 
-    papers = sorted(str(name) for name in df_meta["filename"].dropna().unique())
-    #if min_chunks_per_paper and top_k < len(papers) * min_chunks_per_paper:
-    #    raise ValueError(
-    #        "top_k is too small to include the requested number of chunks from every paper."
-    #    )
+    dense_search_k = min(index.ntotal, search_k if search_k is not None else index.ntotal)
+    keyword_limit = min(len(df_meta), keyword_k if keyword_k is not None else len(df_meta))
 
-    initial_search_k = search_k or max(top_k * 10, len(papers) * max(min_chunks_per_paper, 1), 1000)
-    current_search_k = min(index.ntotal, initial_search_k)
-    search_limit = index.ntotal / 10
-    keyword_limit = keyword_k or max(top_k * 10, len(papers) * max(min_chunks_per_paper, 1), 1000)
-    keyword_limit = min(len(df_meta), keyword_limit)
+    keyword = _bm25_candidates(query_terms, df_meta, top_k=keyword_limit)
+    dense = _dense_candidates(
+        query_embedding=query_embedding,
+        term_embeddings=term_embeddings,
+        df_meta=df_meta,
+        index=index,
+        search_k=dense_search_k,
+    )
+    candidates = _merge_candidates(
+        dense=dense,
+        keyword=keyword,
+        dense_weight=dense_weight,
+        keyword_weight=keyword_weight,
+    )
+    candidates = _filter_and_deduplicate(candidates, filter_noisy=filter_noisy)
 
-    keyword = _keyword_candidates(query_terms, df_meta, top_k=keyword_limit)
-    candidates: list[dict] = []
-
-    while True:
-        dense = _dense_candidates(
-            query_embedding=query_embedding,
-            term_embeddings=term_embeddings,
-            df_meta=df_meta,
-            index=index,
-            search_k=current_search_k,
-        )
-        candidates = _merge_candidates(
-            dense=dense,
-            keyword=keyword,
-            dense_weight=dense_weight,
-            keyword_weight=keyword_weight,
-        )
-        candidates = _filter_and_deduplicate(candidates, filter_noisy=filter_noisy)
-
-        covered_papers = {str(candidate["filename"]) for candidate in candidates}
-        has_coverage = all(paper in covered_papers for paper in papers)
-        if not min_chunks_per_paper or has_coverage or current_search_k >= search_limit:
-            break
-
-        current_search_k = min(index.ntotal, max(current_search_k * 2, current_search_k + top_k))
-
-    return _select_with_paper_coverage(
+    return _select_with_adaptive_threshold(
         candidates=candidates,
-        papers=papers,
-        top_k=top_k,
-        min_chunks_per_paper=min_chunks_per_paper,
+        min_top_k=min_top_k,
+        max_chunks=max_chunks,
+        absolute_min_threshold=absolute_min_threshold,
+        threshold_percentile=threshold_percentile,
+        threshold_margin=threshold_margin,
+        relative_score_margin=relative_score_margin,
     )
