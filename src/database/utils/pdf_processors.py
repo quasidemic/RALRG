@@ -1,5 +1,6 @@
 import os
 import glob
+import math
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,97 @@ import faiss
 from .text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
 
 API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_EMBEDDING_TOKEN_LIMIT = 8192
+OPENAI_EMBEDDING_BATCH_TOKEN_BUFFER = 512
+DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS = (
+    OPENAI_EMBEDDING_TOKEN_LIMIT - OPENAI_EMBEDDING_BATCH_TOKEN_BUFFER
+)
+
+
+def _estimate_embedding_tokens(text: str) -> int:
+    """
+    Conservative token estimate for batching OpenAI embedding requests.
+
+    The exact tokenizer is model-specific, so this intentionally errs on the
+    side of smaller requests to avoid 8192-token input errors.
+    """
+    if not text:
+        return 0
+
+    byte_estimate = math.ceil(len(text.encode("utf-8")) / 3)
+    word_estimate = math.ceil(len(text.split()) * 1.5)
+    return max(1, byte_estimate, word_estimate)
+
+
+def _iter_embedding_batches(chunks: list, max_batch_tokens: int):
+    if max_batch_tokens <= 0:
+        raise ValueError("max_batch_tokens must be greater than 0.")
+
+    batch = []
+    batch_tokens = 0
+
+    for chunk in chunks:
+        chunk_tokens = _estimate_embedding_tokens(chunk)
+
+        if batch and batch_tokens + chunk_tokens > max_batch_tokens:
+            yield batch, batch_tokens
+            batch = []
+            batch_tokens = 0
+
+        batch.append(chunk)
+        batch_tokens += chunk_tokens
+
+    if batch:
+        yield batch, batch_tokens
+
+
+def _is_openai_input_too_long_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "maximum input length" in message
+        or ("token" in message and "input" in message and "too long" in message)
+    )
+
+
+def _create_openai_embeddings_batch(client, chunks: list, model_name: str) -> list:
+    try:
+        response = client.embeddings.create(input=chunks, model=model_name)
+    except Exception as exc:
+        if len(chunks) > 1 and _is_openai_input_too_long_error(exc):
+            midpoint = len(chunks) // 2
+            return (
+                _create_openai_embeddings_batch(client, chunks[:midpoint], model_name)
+                + _create_openai_embeddings_batch(client, chunks[midpoint:], model_name)
+            )
+        raise
+
+    embeddings = sorted(response.data, key=lambda item: getattr(item, "index", 0))
+    return [item.embedding for item in embeddings]
+
+
+def _embed_chunks_openai(
+    client,
+    chunks: list,
+    model_name: str,
+    max_batch_tokens: int = DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS,
+) -> np.ndarray:
+    batches = list(_iter_embedding_batches(chunks, max_batch_tokens))
+    print(f"  Embedding {len(chunks)} chunks in {len(batches)} batch(es)")
+
+    embeddings = []
+    for batch_index, (batch, estimated_tokens) in enumerate(batches, start=1):
+        print(
+            f"    Batch {batch_index}/{len(batches)}: "
+            f"{len(batch)} chunks (~{estimated_tokens} tokens)"
+        )
+        embeddings.extend(_create_openai_embeddings_batch(client, batch, model_name))
+
+    if len(embeddings) != len(chunks):
+        raise RuntimeError(
+            f"Expected {len(chunks)} embeddings but received {len(embeddings)}."
+        )
+
+    return np.array(embeddings, dtype="float32")
 
 # ----------------------------- main pipeline ----------------------------- #
 def process_pdfs(
@@ -95,7 +187,8 @@ def process_pdfs_openai(
     output_dir: str,
     chunk_size: int = 300,
     chunk_overlap: int = 60,
-    model_name="text-embedding-3-large"
+    model_name="text-embedding-3-large",
+    max_batch_tokens: int = DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS,
     ):
 
     # Check for API key
@@ -148,9 +241,13 @@ def process_pdfs_openai(
             print(f"Skipping: {filename} (no chunks)")
             continue
 
-        # Embed via openAI
-        response = client.embeddings.create(input=chunks, model=model_name)
-        emb = np.array([item.embedding for item in response.data], dtype="float32")
+        # Embed via OpenAI in token-bounded batches.
+        emb = _embed_chunks_openai(
+            client=client,
+            chunks=chunks,
+            model_name=model_name,
+            max_batch_tokens=max_batch_tokens,
+        )
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         emb = emb / np.clip(norms, 1e-12, None)
 
