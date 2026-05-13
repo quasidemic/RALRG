@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from sentence_transformers import SentenceTransformer
 import faiss
+import string
 
 from .text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
 
@@ -16,6 +17,25 @@ OPENAI_EMBEDDING_BATCH_TOKEN_BUFFER = 512
 DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS = (
     OPENAI_EMBEDDING_TOKEN_LIMIT - OPENAI_EMBEDDING_BATCH_TOKEN_BUFFER
 )
+
+def _is_noisy_chunk(
+    text: str,
+    char_threshold: float = 0.80,
+    ) -> bool:
+    """
+    Heuristic to detect bibliography/table-like chunks heavy on digits/brackets/punctuation.
+    Returns True if the chunk is considered noisy.
+    """
+    if not text:
+        return True
+
+    digits = sum(c.isdigit() for c in text)
+    brackets = sum(c in "[](){}<>/" for c in text)
+    punct = sum(c in string.punctuation for c in text)
+    total = len(text)
+    noise_ratio = (digits + brackets + punct) / max(total, 1)
+
+    return noise_ratio > char_threshold
 
 
 def _estimate_embedding_tokens(text: str) -> int:
@@ -43,6 +63,9 @@ def _iter_embedding_batches(chunks: list, max_batch_tokens: int):
     for chunk in chunks:
         chunk_tokens = _estimate_embedding_tokens(chunk)
 
+        if chunk_tokens > max_batch_tokens or _is_noisy_chunk(chunk): # hard skip for too long chunks
+            continue
+
         if batch and batch_tokens + chunk_tokens > max_batch_tokens:
             yield batch, batch_tokens
             batch = []
@@ -64,16 +87,20 @@ def _is_openai_input_too_long_error(exc: Exception) -> bool:
 
 
 def _create_openai_embeddings_batch(client, chunks: list, model_name: str) -> list:
+    if len(chunks) == 0:
+        return []
     try:
         response = client.embeddings.create(input=chunks, model=model_name)
     except Exception as exc:
-        if len(chunks) > 1 and _is_openai_input_too_long_error(exc):
+        if _is_openai_input_too_long_error(exc):
             midpoint = len(chunks) // 2
             return (
                 _create_openai_embeddings_batch(client, chunks[:midpoint], model_name)
                 + _create_openai_embeddings_batch(client, chunks[midpoint:], model_name)
             )
-        raise
+        else:
+            print(chunks)
+            raise
 
     embeddings = sorted(response.data, key=lambda item: getattr(item, "index", 0))
     return [item.embedding for item in embeddings]
@@ -96,10 +123,8 @@ def _embed_chunks_openai(
         )
         embeddings.extend(_create_openai_embeddings_batch(client, batch, model_name))
 
-    if len(embeddings) != len(chunks):
-        raise RuntimeError(
-            f"Expected {len(chunks)} embeddings but received {len(embeddings)}."
-        )
+    if len(embeddings) == 0:
+        return None
 
     return np.array(embeddings, dtype="float32")
 
@@ -248,22 +273,29 @@ def process_pdfs_openai(
             model_name=model_name,
             max_batch_tokens=max_batch_tokens,
         )
-        norms = np.linalg.norm(emb, axis=1, keepdims=True)
-        emb = emb / np.clip(norms, 1e-12, None)
+        if emb.any():
+            norms = np.linalg.norm(emb, axis=1, keepdims=True)
+            emb = emb / np.clip(norms, 1e-12, None)
 
-        # add to combined embeddings and records
-        all_embeddings.append(emb)
+            if len(emb) != len(chunks):
+                print(f"Some chunks failed to embed for {filename}. {len(chunks)-len(emb)} chunks missing.")
 
-        n = emb.shape[0]
-        for i in range(n):
-            records.append(
-                {
-                    "vector_id": vector_id,
-                    "filename": filename,
-                    "chunk": chunks[i],
-                }
-            )
-            vector_id += 1
+            # add to combined embeddings and records
+            all_embeddings.append(emb)
+
+            n = emb.shape[0]
+            for i in range(n):
+                records.append(
+                    {
+                        "vector_id": vector_id,
+                        "filename": filename,
+                        "chunk": chunks[i],
+                    }
+                )
+                vector_id += 1
+        else:
+            print(f"Embedding failed for {filename}")
+        
 
     if not records:
         raise RuntimeError("No chunks/embeddings created.")
