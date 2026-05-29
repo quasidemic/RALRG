@@ -1,8 +1,9 @@
 import argparse
 import json
 from pathlib import Path
+from ast import literal_eval
 
-from utils.loaders import load_jsonl_records
+from utils.loaders import load_jsonl_records, split_jsonl_records_into_batches
 from utils.prompter import produce_records
 from utils.summarize import write_records_txt, store_as_json
 
@@ -11,7 +12,7 @@ def main():
         description="Create structured information records from retrieved chunk JSONL."
     )
     parser.add_argument(
-        "--input_jsonl",
+        "--input_dir",
         required=True,
         help="Path to JSON Lines file containing retrieved chunk records.",
     )
@@ -27,8 +28,8 @@ def main():
         choices=["theory", "previous_studies", "methods", "findings"]
     )
     parser.add_argument(
-        "--output_path",
-        help="Optional path to write the structured records JSON returned by the model.",
+        "--output_dir",
+        help="Optional dir to write the structured records JSON returned by the model.",
     )
     parser.add_argument(
         "--model",
@@ -41,23 +42,30 @@ def main():
     )
     args = parser.parse_args()
 
-    hits = load_jsonl_records(args.input_jsonl)
+    input_jsonl = Path(args.input_dir) / f"relevant_chunks_{args.infotype}.jsonl"
+
+    hits = load_jsonl_records(input_jsonl)    
 
     if args.first_k:
         k = int(args.first_k)
     else:
         k = len(hits)
 
-    records = produce_records(hits=hits[:k], type=args.infotype, model=args.model)
+    batches = split_jsonl_records_into_batches(records=hits[:k])
 
-    if args.output_path:
-        try:
-            store_as_json(records, args.output_path)
-        except ValueError as e:
-            print(f"Unable to store as json. Writing as txt: {e}")
-            write_records_txt(records, args.output_path)
-    else:
-        print(records)
+    for c, batch in enumerate(batches, start=1):
+        records = produce_records(hits=batch, schema_path=args.input_schema, type=args.infotype, model=args.model)
+        
+        if args.output_dir:
+            output_path = Path(args.output_dir) / f"records_{args.infotype}.jsonl"
+            try:
+                records = literal_eval(records)
+                store_as_json(records, output_path)
+            except (ValueError, TypeError) as e:
+                print(f"Unable to store records from batch {c} as json. Writing as txt: {e}")
+                write_records_txt(records, output_path)
+        else:
+            print(records)
 
 
 if __name__ == "__main__":

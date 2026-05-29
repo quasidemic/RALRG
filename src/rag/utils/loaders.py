@@ -1,3 +1,4 @@
+import math
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -34,6 +35,52 @@ def load_jsonl_records(input_path: str | Path) -> list[dict]:
                 raise ValueError(f"Line {line_number} is not a JSON object.")
             records.append(record)
     return records
+
+
+def _estimate_openai_tokens(text: str) -> int:
+    if not text:
+        return 0
+
+    byte_estimate = math.ceil(len(text.encode("utf-8")) / 3)
+    word_estimate = math.ceil(len(text.split()) * 1.5)
+
+    return max(1, byte_estimate, word_estimate)
+
+
+def split_jsonl_records_into_batches(
+    records: list[dict],
+    max_batch_tokens: int = 50000,
+) -> list[list[dict]]:
+    if max_batch_tokens <= 0:
+        raise ValueError("max_batch_tokens must be greater than 0.")
+
+    batches = []
+    batch = []
+    batch_tokens = 0
+
+    for record in records:
+        record_text = json.dumps(record, ensure_ascii=False, sort_keys=True)
+        record_tokens = _estimate_openai_tokens(record_text)
+
+        if record_tokens > max_batch_tokens:
+            raise ValueError(
+                f"Record is too large for one batch "
+                f"(~{record_tokens} tokens > max_batch_tokens={max_batch_tokens})."
+            )
+
+        if batch and batch_tokens + record_tokens > max_batch_tokens:
+            batches.append(batch)
+            batch = []
+            batch_tokens = 0
+
+        batch.append(record)
+        batch_tokens += record_tokens
+
+    if batch:
+        batches.append(batch)
+
+    return batches
+
 
 def read_text_file(path: str, description: str) -> str:
     """

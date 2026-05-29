@@ -33,10 +33,10 @@ def open_results_in_browser(hits: list[dict]) -> None:
 
 ## WRITERS ##
 def store_as_json(hits: list[dict], output_path) -> None:
-    
+    output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with output_path.open("w", encoding="utf-8") as f:
+    with output_path.open("a", encoding="utf-8") as f:
         for hit in hits:
             if not isinstance(hit, dict):
                 raise TypeError("store_as_json expects a list of dict records.")
@@ -45,7 +45,10 @@ def store_as_json(hits: list[dict], output_path) -> None:
 def write_records_txt(records: str, output_path: str | Path) -> None:
     output_path = Path(output_path).with_suffix(".txt")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(records, encoding="utf-8")
+    with output_path.open("a", encoding="utf-8") as f:
+        f.write(records)
+        if records and not records.endswith("\n"):
+            f.write("\n")
 
 ## SUMMARIZERS ## 
 def summarize_with_gpt(

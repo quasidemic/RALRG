@@ -33,7 +33,7 @@ def _produce_prompt(schema_path, type):
     Rules:
     - Do not infer beyond the text.
     - Always include the filename where the record is from (located just above chunk) (field: "paper_filename").
-    - Use null if the field is not present.
+    - Use empty string ("") if the field is not present.
     - Keep records separated by claim: one record per unique information.
     - Include supporting chunk IDs for every extracted claim (field: "supporting_chunk_ids").
     - Include quotes/snippets from the chunk supporting the claim in the record (field: "supporting_quotes").
@@ -108,6 +108,6 @@ def produce_records(
         raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
 
     try:
-        return resp.choices[0].message.content or {}
+        return resp.choices[0].message.content or []
     except Exception:
-        return {}
+        return []
