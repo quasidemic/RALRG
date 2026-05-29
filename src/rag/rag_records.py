@@ -16,9 +16,15 @@ def main():
         help="Path to JSON Lines file containing retrieved chunk records.",
     )
     parser.add_argument(
+        "--input_schema",
+        required=True,
+        help="Path to JSON schema to use for structured retrieval."
+    )
+    parser.add_argument(
         "--infotype",
         required=True,
-        help="Information type to extract, matching a key in schemas/tasks.json.",
+        help="Information type to extract, matching a key in schema.",
+        choices=["theory", "previous_studies", "methods", "findings"]
     )
     parser.add_argument(
         "--output_path",

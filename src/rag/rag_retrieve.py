@@ -22,9 +22,14 @@ def main():
         help="Directory for outputting retrieved chunks as json lines."
     )
     parser.add_argument(
+        "--input_schema",
+        required=True,
+        help="Path to JSON schema to use for structured retrieval."
+    )
+    parser.add_argument(
         "--infotype",
         help="Specify the type of information to retrieve",
-        choices=["theory"]
+        choices=["theory", "previous_studies", "methods", "findings"]
     )
     parser.add_argument(
         "--min_top_k",
@@ -84,7 +89,7 @@ def main():
     )
 
     # Queries
-    query, query_terms = load_queries(args.infotype)
+    query, query_terms = load_queries(args.input_schema, args.infotype)
 
     # Read chunks and embeddings
     df_meta, index = load_index_from_dir(args.input_dir)

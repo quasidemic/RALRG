@@ -6,10 +6,10 @@ import json
 env_path = Path("/home/ubuntu/ragstuff/.env")
 load_dotenv(env_path)
 
-SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
+#SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
 
-def load_queries(type):
-    with open(SCHEMA_PATH, "r") as f:
+def load_queries(schema_path, type):
+    with open(schema_path, "r") as f:
         schemas = json.load(f)
 
     if type not in schemas.keys():

@@ -6,11 +6,11 @@ from dotenv import load_dotenv
 env_path = Path("/home/ubuntu/ragstuff/.env")
 load_dotenv(env_path)
 
-SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
+#SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
 
-def _produce_prompt(type):
+def _produce_prompt(schema_path, type):
 
-    with open(SCHEMA_PATH, "r") as f:
+    with open(schema_path, "r") as f:
         schemas = json.load(f)
 
     if type not in schemas.keys():
@@ -26,6 +26,10 @@ def _produce_prompt(type):
     Return JSON records using this schema:
     {schema_use}
 
+    Use the keys of the JSON schema for the returned JSON records. The values provide explanations as to what the keys should contain.
+    If the value is a string, it is a guide for what to extract.
+    If the value is a list of strings, use one of the provided strings.
+
     Rules:
     - Do not infer beyond the text.
     - Always include the filename where the record is from (located just above chunk) (field: "paper_filename").
@@ -35,6 +39,9 @@ def _produce_prompt(type):
     - Include quotes/snippets from the chunk supporting the claim in the record (field: "supporting_quotes").
     - If applicable, include the citations appearing that pertain to the claim (field: "citations_used").
     - If multiple chunks describe support the same claim, combine them into one record.
+    - Do not add new keys to the JSON. Stick to the provided schema.
+    - Use the values of the JSON schema as rules for what to include, unless already specified in the rules.
+    - If a value in the JSON schema is a list of strings, only use the provided strings (return as list of strings relevant for the specific claim).
     - Strictly return the JSON records. No lead-in or summarizing text surrounding records. Response has to be a valid JSON.
     """
 
@@ -42,6 +49,7 @@ def _produce_prompt(type):
 
 def _build_full_prompt(
     hits, 
+    schema_path,
     type,
     custom_prompt_text=None
     ):
@@ -49,7 +57,7 @@ def _build_full_prompt(
     if not hits:
         return "No hits to summarize."
 
-    prompt_text = _produce_prompt(type)
+    prompt_text = _produce_prompt(schema_path, type)
 
     chunk_parts = []
     for h in hits:
@@ -73,12 +81,13 @@ def _build_full_prompt(
 
 def produce_records(
     hits,
+    schema_path,
     type,
     model = "gpt-5.4-nano",
     custom_prompt_text=None
     ):
 
-    prompt = _build_full_prompt(hits, type, custom_prompt_text)
+    prompt = _build_full_prompt(hits, schema_path, type, custom_prompt_text)
 
     try:
         from openai import OpenAI  # type: ignore
