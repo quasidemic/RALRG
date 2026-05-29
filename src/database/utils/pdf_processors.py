@@ -28,7 +28,7 @@ def _is_noisy_chunk(
     char_threshold: float = 0.80,
     ) -> bool:
     """
-    Heuristic to detect bibliography/table-like chunks heavy on digits/brackets/punctuation.
+    Heuristic to detect nonsense chunks consisting mainly of digits/brackets/punctuation.
     Returns True if the chunk is considered noisy.
     """
     if not text:

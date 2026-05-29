@@ -10,7 +10,7 @@ import pandas as pd
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 BM25_TOKEN_PATTERN = re.compile(r"\b\w+\b", re.UNICODE)
 
-def is_noisy_chunk(
+def _is_bib_or_table_chunk(
     text: str,
     char_threshold: float = 0.25,
     token_threshold: float = 0.4,
@@ -306,7 +306,7 @@ def _filter_and_deduplicate(candidates: list[dict], filter_noisy: bool) -> list[
             continue
 
         chunk = str(candidate["chunk"])
-        if filter_noisy and is_noisy_chunk(chunk):
+        if filter_noisy and _is_bib_or_table_chunk(chunk):
             continue
 
         chunk_key = (str(candidate["filename"]), " ".join(chunk.casefold().split()))
@@ -378,12 +378,11 @@ def retrieve_rag_chunks_openai(
     query_terms: Sequence[str],
     df_meta: pd.DataFrame,
     index: Any,
-    top_k: Optional[int] = None,
     min_top_k: int = 30,
-    max_chunks: int = 300,
+    max_chunks: int = 1000,
     absolute_min_threshold: float = 0.0,
-    threshold_percentile: float = 90.0,
-    threshold_margin: float = 0.03,
+    threshold_percentile: float = 97.0,
+    threshold_margin: float = 0.01,
     relative_score_margin: Optional[float] = None,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     search_k: Optional[int] = None,
@@ -397,17 +396,14 @@ def retrieve_rag_chunks_openai(
     """
     Retrieve RAG chunks with OpenAI embeddings plus BM25 keyword matching.
 
+    Based on a query, query terms and an existing embeddings index (FAISS), the query and query terms are embedded using OpenAI, which is then matched against the database. 
+
     Selection keeps all chunks above a query-adaptive score threshold, enforces
     `min_top_k` as a floor, and caps the final result set at `max_chunks`.
-    `top_k` is retained as a backwards-compatible alias for `min_top_k`; it is
-    not a final result cap.
+    
     """
     if not query:
         raise ValueError("query must not be empty.")
-    if top_k is not None:
-        if top_k <= 0:
-            raise ValueError("top_k must be positive.")
-        min_top_k = top_k
     if min_top_k <= 0:
         raise ValueError("min_top_k must be positive.")
     if max_chunks <= 0:
