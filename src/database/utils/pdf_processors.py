@@ -9,7 +9,12 @@ from sentence_transformers import SentenceTransformer
 import faiss
 import string
 
+from dotenv import load_dotenv
+
 from .text_utils import extract_text_from_pdf, chunk_text_with_pysbd, chunk_text_with_langchain
+
+env_path = Path("/home/ubuntu/ragstuff/.env")
+load_dotenv(env_path)
 
 API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_EMBEDDING_TOKEN_LIMIT = 8192
@@ -122,9 +127,6 @@ def _embed_chunks_openai(
             f"{len(batch)} chunks (~{estimated_tokens} tokens)"
         )
         embeddings.extend(_create_openai_embeddings_batch(client, batch, model_name))
-
-    if len(embeddings) == 0:
-        return None
 
     return np.array(embeddings, dtype="float32")
 
