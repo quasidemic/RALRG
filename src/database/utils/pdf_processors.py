@@ -55,10 +55,14 @@ def _estimate_embedding_tokens(text: str) -> int:
 
     byte_estimate = math.ceil(len(text.encode("utf-8")) / 3)
     word_estimate = math.ceil(len(text.split()) * 1.5)
+
     return max(1, byte_estimate, word_estimate)
 
 
-def _iter_embedding_batches(chunks: list, max_batch_tokens: int):
+def _iter_chunks_to_batches(chunks: list, max_batch_tokens: int):
+    """
+    Groups chunks into batches until max_batch_tokens limit is reached.
+    """
     if max_batch_tokens <= 0:
         raise ValueError("max_batch_tokens must be greater than 0.")
 
@@ -91,7 +95,12 @@ def _is_openai_input_too_long_error(exc: Exception) -> bool:
     )
 
 
-def _create_openai_embeddings_batch(client, chunks: list, model_name: str) -> list:
+def _embed_batch_openai(client, chunks: list, model_name: str) -> list:
+    """
+    Embeds batch of chunks using OpenAI. 
+    If "maximum input length" is encountered, the batch is halved and then embedded one at a time (recursively).
+    Raises if other errors are encountered.
+    """
     if len(chunks) == 0:
         return []
     try:
@@ -100,12 +109,12 @@ def _create_openai_embeddings_batch(client, chunks: list, model_name: str) -> li
         if _is_openai_input_too_long_error(exc):
             midpoint = len(chunks) // 2
             return (
-                _create_openai_embeddings_batch(client, chunks[:midpoint], model_name)
-                + _create_openai_embeddings_batch(client, chunks[midpoint:], model_name)
+                _embed_batch_openai(client, chunks[:midpoint], model_name)
+                + _embed_batch_openai(client, chunks[midpoint:], model_name)
             )
         else:
             print(chunks)
-            raise
+            raise exc
 
     embeddings = sorted(response.data, key=lambda item: getattr(item, "index", 0))
     return [item.embedding for item in embeddings]
@@ -117,7 +126,13 @@ def _embed_chunks_openai(
     model_name: str,
     max_batch_tokens: int = DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS,
 ) -> np.ndarray:
-    batches = list(_iter_embedding_batches(chunks, max_batch_tokens))
+    """
+    Embedding all chunks in a text with OpenAI. 
+    Starts by lumping chunks together in batches and then processing each batch using helper function.
+    Returns a single array of all embedded chunks in a text.
+    """
+
+    batches = list(_iter_chunks_to_batches(chunks, max_batch_tokens))
     print(f"  Embedding {len(chunks)} chunks in {len(batches)} batch(es)")
 
     embeddings = []
@@ -126,7 +141,7 @@ def _embed_chunks_openai(
             f"    Batch {batch_index}/{len(batches)}: "
             f"{len(batch)} chunks (~{estimated_tokens} tokens)"
         )
-        embeddings.extend(_create_openai_embeddings_batch(client, batch, model_name))
+        embeddings.extend(_embed_batch_openai(client, batch, model_name))
 
     return np.array(embeddings, dtype="float32")
 
@@ -217,6 +232,13 @@ def process_pdfs_openai(
     model_name="text-embedding-3-large",
     max_batch_tokens: int = DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS,
     ):
+    """
+    Processes a directory of pdfs into a embeddings database (FAISS index + parquet).
+    Uses OpenAI text embedding model for embedding.
+    Pdfs are processed PyPDF2.
+    Texts from pdfs are chunked using langchain, allowing for overlap of chunks (chunk_overlap). 
+    Chunks are grouped into batches before embedding via OpenAI.
+    """
 
     # Check for API key
     if not API_KEY:
