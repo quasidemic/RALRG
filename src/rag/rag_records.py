@@ -61,7 +61,7 @@ def main():
             try:
                 records = literal_eval(records)
                 store_as_json(records, output_path)
-            except (ValueError, TypeError) as e:
+            except (ValueError, TypeError, SyntaxError) as e:
                 print(f"Unable to store records from batch {c} as json. Writing as txt: {e}")
                 write_records_txt(records, output_path)
         else:
