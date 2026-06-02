@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RAG Record Search</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <main class="app-shell">
+        <section id="load-view" class="load-view">
+            <div class="load-panel">
+                <p class="eyebrow">JSONL browser</p>
+                <h1>RAG Record Search</h1>
+                <p class="intro">
+                    Select one or more JSONL record files created by <code>rag_records.py</code>.
+                    The records stay local in this browser window.
+                </p>
+
+                <label class="file-picker" for="record-files">
+                    <span class="file-picker-title">Choose JSONL files</span>
+                    <span class="file-picker-subtitle">Use <code>records_theory.jsonl</code>, <code>records_findings.jsonl</code>, or similar outputs.</span>
+                    <input id="record-files" type="file" accept=".jsonl,.json,application/json" multiple>
+                </label>
+
+                <div id="load-status" class="load-status" role="status"></div>
+            </div>
+        </section>
+
+        <section id="search-view" class="search-view hidden" aria-live="polite">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">Loaded records</p>
+                    <h1>RAG Record Search</h1>
+                </div>
+                <button id="load-other-files" class="secondary-button" type="button">Load files</button>
+                <input id="reload-record-files" class="screen-reader-only" type="file" accept=".jsonl,.json,application/json" multiple>
+            </header>
+
+            <section class="summary-band">
+                <div>
+                    <span class="summary-value" id="record-count">0</span>
+                    <span class="summary-label">records</span>
+                </div>
+                <div>
+                    <span class="summary-value" id="field-count">0</span>
+                    <span class="summary-label">fields</span>
+                </div>
+                <div>
+                    <span class="summary-value" id="file-count">0</span>
+                    <span class="summary-label">files</span>
+                </div>
+                <div id="file-list" class="file-list"></div>
+            </section>
+
+            <form id="search-form" class="search-form">
+                <label class="field-control search-control">
+                    <span>Search</span>
+                    <input id="search-query" type="search" autocomplete="off" placeholder="Search record values">
+                </label>
+
+                <label class="field-control">
+                    <span>Field</span>
+                    <select id="field-select"></select>
+                </label>
+
+                <label class="field-control compact-control">
+                    <span>Limit</span>
+                    <input id="result-limit" type="number" min="1" step="1" value="250">
+                </label>
+
+                <label class="checkbox-control">
+                    <input id="case-sensitive" type="checkbox">
+                    <span>Case sensitive</span>
+                </label>
+
+                <button class="primary-button" type="submit">Search</button>
+                <button id="clear-search" class="secondary-button" type="button">Clear</button>
+            </form>
+
+            <section class="results-header">
+                <div>
+                    <h2 id="results-title">Records</h2>
+                    <p id="results-meta">Load a file to begin.</p>
+                </div>
+            </section>
+
+            <section id="results" class="results"></section>
+        </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+</body>
+</html>
