@@ -50,6 +50,15 @@ def write_records_txt(records: str, output_path: str | Path) -> None:
         if records and not records.endswith("\n"):
             f.write("\n")
 
+
+def write_to_markdown(markdown: str, output_path: str | Path) -> None:
+    output_path = Path(output_path).with_suffix(".md")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        f.write(markdown)
+        if markdown and not markdown.endswith("\n"):
+            f.write("\n")
+
 ## SUMMARIZERS ## 
 def summarize_with_gpt(
     hits: list[dict],

@@ -37,6 +37,14 @@ def load_jsonl_records(input_path: str | Path) -> list[dict]:
     return records
 
 
+def load_markdown_file(input_path: str | Path) -> str:
+    path = Path(input_path)
+    if path.suffix.lower() != ".md":
+        raise ValueError(f"Expected a .md file, got: {path}")
+
+    return read_text_file(str(path), "markdown")
+
+
 def _estimate_openai_tokens(text: str) -> int:
     if not text:
         return 0
