@@ -7,3 +7,4 @@ openaikey.txt
 *.zip
 *__pycache__*
 .env
+input

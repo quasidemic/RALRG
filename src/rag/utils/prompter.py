@@ -8,7 +8,43 @@ load_dotenv(env_path)
 
 #SCHEMA_PATH = Path(os.getenv("PROJECT_DIR")) / "schemas" / "tasks.json"
 
-def _produce_prompt(schema_path, type):
+##----## PRODUCE STRUCTURED RECORDS PROMPT ##----## 
+
+def produce_records(
+    hits,
+    schema_path,
+    type,
+    model = "gpt-5.4-nano",
+    custom_prompt_text=None
+    ):
+
+    prompt = _build_full_prompt_records(hits, schema_path, type, custom_prompt_text)
+
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as e:
+        raise RuntimeError("openai package not installed; pip install openai") from e
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set in environment.")
+
+    client = OpenAI(api_key=api_key)
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
+
+    try:
+        return resp.choices[0].message.content or []
+    except Exception:
+        return []
+
+
+def _produce_prompt_preamble_records(schema_path, type):
 
     with open(schema_path, "r") as f:
         schemas = json.load(f)
@@ -47,7 +83,8 @@ def _produce_prompt(schema_path, type):
 
     return(prompt)
 
-def _build_full_prompt(
+
+def _build_full_prompt_records(
     hits, 
     schema_path,
     type,
@@ -57,7 +94,7 @@ def _build_full_prompt(
     if not hits:
         return "No hits to summarize."
 
-    prompt_text = _produce_prompt(schema_path, type)
+    prompt_text = _produce_prompt_preamble_records(schema_path, type)
 
     chunk_parts = []
     for h in hits:
@@ -79,15 +116,83 @@ def _build_full_prompt(
     return full_prompt
 
 
-def produce_records(
-    hits,
+##----## PRODUCE REVIEW PROMPT ##----## 
+
+def _produce_prompt_preamble_review(schema_path, type):
+
+    with open(schema_path, "r") as f:
+        schemas = json.load(f)
+
+    if type not in schemas.keys():
+        raise ValueError(f"Invalid type input: {type}. Expected one of {', '.join(schemas.keys())}")
+
+    schema_use = schemas.get("global").get("extraction_schema") | (schemas.get(type).get("extraction_schema"))
+
+    revise_input = '\n'.join(schemas.get(type).get("prompt_input"))
+
+    prompt = f"""
+    You are writing a section of a research article focusing on {type}.
+    
+    You are provided with a current version of the text (TEXT) and a number of extracted records from a literature search (RECORDS). 
+
+    You must revise the text based on the provided records. 
+
+    Address the following revision points when revising the text:: 
+    {revise_input}
+
+    All records from the literature search conform to this schema:
+    {schema_use}
+
+    Carefully inspect each provided record and assess, whether it is relevant for the text in context of the revision points. Revise the text based on the provided records. Return the revised text as valid .md. 
+
+    Rules:
+    - Do not infer or speculate beyond the provided text and the provided records.
+    - If a statement or claim is revised using a provided record, include the relevant citation along with the chunk ID.
+    - Use paper_filename as citation reference. 
+    - If multiple records support the same statement or claim, write into coherent single statements or claims citing all relevant records.
+    - All claims or statements must have citations. 
+    - Make sure all citations are either from the existing text or one of the provided records.
+    - Only return the revised text.
+    - Return the revised text as valid .md.
+    """
+
+    return(prompt)
+
+
+def _build_full_prompt_review(
+    text, 
+    records,
+    schema_path,
+    type
+    ):
+    
+    if not records:
+        return "No records to use for revision."
+
+    prompt_text = _produce_prompt_preamble_review(schema_path, type)
+
+    records_parts = []
+    for r in records:
+        records_parts.append(
+            "\n".join(f"{key}: {value}" for key, value in r.items()) + "\n" + "-----"
+        )
+    records_text = "\n\n".join(records_parts)
+    
+    parts = [prompt_text, "-----\nTEXT:\n-----", text, "-----\nRECORDS:\n-----", records_text]
+
+    full_prompt = "\n\n".join(parts)
+
+    return full_prompt
+
+def produce_review(
+    text,
+    records,
     schema_path,
     type,
-    model = "gpt-5.4-nano",
-    custom_prompt_text=None
+    model = "gpt-5.4-mini"
     ):
 
-    prompt = _build_full_prompt(hits, schema_path, type, custom_prompt_text)
+    prompt = _build_full_prompt_review(text, records, schema_path, type)
 
     try:
         from openai import OpenAI  # type: ignore
@@ -107,7 +212,4 @@ def produce_records(
     except Exception as e:
         raise RuntimeError(f"OpenAI chat completion failed: {e}") from e
 
-    try:
-        return resp.choices[0].message.content or []
-    except Exception:
-        return []
+    return resp.choices[0].message.content

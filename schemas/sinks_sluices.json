@@ -8,53 +8,53 @@
         }
     },
     "theory": {
-    "query": "Theoretical frameworks, concepts, and mechanisms used to explain immigrant internal migration, neighbourhood settlement, residential mobility, segregation, and integration outcomes. Focus on how theories conceptualize neighbourhoods as dynamic contexts shaped by migration flows, group-specific settlement trajectories, and socioeconomic integration processes.",
-    "query_terms": [
-        "theory",
-        "theories",
-        "theoretical",
-        "framework",
-        "model",
-        "mechanism",
-        "concept",
-        "conceptualize",
-        "hypothesis",
-        "explanation",
-        "approach",
-        "neighbourhood",
-        "neighborhood",
-        "immigrant settlement",
-        "internal migration",
-        "residential mobility",
-        "settlement patterns",
-        "migration flows",
-        "segregation",
-        "integration",
-        "socioeconomic integration",
-        "marginalisation",
-        "marginalization",
-        "neighbourhood effects",
-        "neighbourhood dynamics",
-        "urban system",
-        "Chicago School",
-        "human ecology",
-        "ecological perspective",
-        "invasion",
-        "competition",
-        "succession",
-        "spatial assimilation",
-        "residential assimilation",
-        "immigrant enclave",
-        "segmented assimilation",
-        "collective efficacy",
-        "port of first entry",
-        "sinks",
-        "sluices",
-        "ethnic enclave",
-        "group-specific",
-        "selective mobility",
-        "residential preferences"
-        ],
+        "query": "Theoretical frameworks, concepts, and mechanisms used to explain immigrant internal migration, neighbourhood settlement, residential mobility, segregation, and integration outcomes. Focus on how theories conceptualize neighbourhoods as dynamic contexts shaped by migration flows, group-specific settlement trajectories, and socioeconomic integration processes.",
+        "query_terms": [
+            "theory",
+            "theories",
+            "theoretical",
+            "framework",
+            "model",
+            "mechanism",
+            "concept",
+            "conceptualize",
+            "hypothesis",
+            "explanation",
+            "approach",
+            "neighbourhood",
+            "neighborhood",
+            "immigrant settlement",
+            "internal migration",
+            "residential mobility",
+            "settlement patterns",
+            "migration flows",
+            "segregation",
+            "integration",
+            "socioeconomic integration",
+            "marginalisation",
+            "marginalization",
+            "neighbourhood effects",
+            "neighbourhood dynamics",
+            "urban system",
+            "Chicago School",
+            "human ecology",
+            "ecological perspective",
+            "invasion",
+            "competition",
+            "succession",
+            "spatial assimilation",
+            "residential assimilation",
+            "immigrant enclave",
+            "segmented assimilation",
+            "collective efficacy",
+            "port of first entry",
+            "sinks",
+            "sluices",
+            "ethnic enclave",
+            "group-specific",
+            "selective mobility",
+            "residential preferences"
+            ],
         "extraction_schema": {
             "theory_or_framework": "Extract the name of the theory, framework, perspective, or analytical tradition being discussed. This should usually be a named theory or recognizable framework",
             "core_concept": "Extract the central concept from the theory or framework that is relevant to the article.",
@@ -70,7 +70,14 @@
                 "critiquing prior work",
                 "purely background or framing"
             ]
-        }
+        },
+        "prompt_input": [
+            "- Reframe Park and Burgess as historical and metaphorical starting points, not as the main explanatory framework", 
+            "- clearer, focused theoretical synthesis",
+            "- Explicitly state which parts of urban ecology remain useful and which are rejected.",
+            "- Clarify/explain/elaborate on sinks and sluices as theoretical constructs in a dedicated section. Clarify whether sinks/sluices are new concepts, adations, empirical labels.",
+            "- Emphasize what sinks and sluices as theoretical constructs add (shifting the focus from static immigrant concentration to dynamic relational position in migration flows)"
+        ]
     },
      "previous_studies": {
         "query": "Empirical studies and prior research on immigrant internal migration, neighbourhood settlement, residential mobility, segregation, neighbourhood effects, and socioeconomic integration outcomes. Focus on what previous studies found, where they were conducted, which immigrant groups or populations they examined, what methods and data they used, and how their findings relate to the present study.",
@@ -305,6 +312,9 @@
         "mixed relative to prior research",
         "not linked to prior research"
       ]
-    }
+    },
+    "prompt_input": [
+            "- emphasize that heterogeneity among population groups may lead to different outcomes in terms of segregation (e.g., segregation of wealthy versus poor immigrants)"
+        ]
   }
 }
