@@ -1,3 +1,7 @@
+## 2026-07-03
+- Dannede og kørte runners til intminet
+- Klargører til kopiere til lokal opsætning
+
 ## 2026-06-02
 - Summarizer færdig (OBS: bruger gpt-5.4 nu i scripts, men 5.4-mini som default)
 - Brugerflade til at søge records eller chunks (se src/search - standalone html der kan læse en eller flere jsonl ind)
@@ -11,7 +15,7 @@
     - Hvis relevant_chunks findes; skip
     - Hvis records findes; skip
     - Opdatér tekst
-- Næste skridt: Mulighed for at skrive tekst fra bunden? (evt. blot en prompt justering)
+- Næste skridt: Mulighed for at skrive tekst fra bunden? (evt. blot en prompt justering?)
 
 
 ## 2026-05-29
