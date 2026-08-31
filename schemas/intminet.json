@@ -62,6 +62,11 @@
             ]
         },
         "prompt_input": [
+			"- The theory section (The social structural sorting perspective) must clearly outline each of the included theories and properly contrast especially the social structural sorting perspective with other perspective",
+			"- Include relevant examples from the included sources on how the theories have been used",
+			"- Elaborate on the central assumptions of the theories",
+			"- Underline how segregated patterns of resettlement may persist because of social structural sorting",
+			"- Underline how specific geographic patterns of resettlement may persist because of social structurla sorting"
         ]
     },
      "previous_studies": {
@@ -192,7 +197,13 @@
                 "justifying methodological choices",
                 "discussing limitations"
             ]
-        }
+        },
+        "prompt_input": [
+            "- Identify the type of statistical model used (descriptive, linear regression, logistic regression)",
+            "- Identify how main variables of interest are defined and measured",
+            "- Emphasise the tendency to focus on specific neighbourhood covariates/traits/statistics, if supported by the chunks provided",
+            "- Highlight potential confounding arising from not accounting from structural dependence between neighbourhood or the specific location of such - are they spread across few or many neighbourhoods?"
+        ]
   },
   "findings": {
     "query": "Empirical findings, results, patterns, and interpretations concerning immigrant internal migration, neighbourhood typologies, settlement destinations, integration outcomes, group-specific differences, geographic variation, and neighbourhood-level associations. Focus on what the study finds, whether associations are positive, negative, mixed, absent, group-dependent, neighbourhood-dependent, or temporally changing.",
@@ -296,6 +307,11 @@
       ]
     },
     "prompt_input": [
+		"- Focus on findings related to presence of natives, other immigrants, co-ethnics and socio-economic status or neighbourhood income level",
+		"- Highlight potentially conflicting findings",
+		"- Highlight studies and findings emphasising social networks and housing search as possible explanations",
+		"- Structure section so that it is clear, that studies tend to focus on specific neighbourhood traits or categories.",
+		"- Summarize the main gaps"
         ]
   }
 }

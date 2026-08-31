@@ -1,3 +1,3 @@
-export OPENAI_API_KEY="$(cat openaikey.txt)"
+export OPENAI_API_KEY="$(cat ./openaikey.txt)"
 
-export PROJECT_DIR="/home/ubuntu/ragstuff/"
+export PROJECT_DIR="/home/kgk/repos/RALRG/"

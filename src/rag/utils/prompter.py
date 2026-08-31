@@ -152,6 +152,7 @@ def _produce_prompt_preamble_review(schema_path, type):
     - If multiple records support the same statement or claim, write into coherent single statements or claims citing all relevant records.
     - All claims or statements must have citations. 
     - Make sure all citations are either from the existing text or one of the provided records.
+    - Do not remove existing citations in the input text.
     - Only return the revised text.
     - Return the revised text as valid .md.
     """
