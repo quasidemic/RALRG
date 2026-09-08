@@ -135,15 +135,19 @@ def _embed_chunks_openai(
     batches = list(_iter_chunks_to_batches(chunks, max_batch_tokens))
     print(f"  Embedding {len(chunks)} chunks in {len(batches)} batch(es)")
 
+    embedded_chunks = []
     embeddings = []
     for batch_index, (batch, estimated_tokens) in enumerate(batches, start=1):
         print(
             f"    Batch {batch_index}/{len(batches)}: "
             f"{len(batch)} chunks (~{estimated_tokens} tokens)"
         )
-        embeddings.extend(_embed_batch_openai(client, batch, model_name))
+        batch_embeddings = _embed_batch_openai(client, batch, model_name)
 
-    return np.array(embeddings, dtype="float32")
+        embedded_chunks = embedded_chunks.extend(batch)
+        embeddings.extend(batch_embeddings)
+
+    return embedded_chunks, np.array(embeddings, dtype="float32")
 
 # ----------------------------- main pipeline ----------------------------- #
 def process_pdfs(
@@ -291,7 +295,7 @@ def process_pdfs_openai(
             continue
 
         # Embed via OpenAI in token-bounded batches.
-        emb = _embed_chunks_openai(
+        embedded_chunks, emb = _embed_chunks_openai(
             client=client,
             chunks=chunks,
             model_name=model_name,
@@ -307,13 +311,12 @@ def process_pdfs_openai(
             # add to combined embeddings and records
             all_embeddings.append(emb)
 
-            n = emb.shape[0]
-            for i in range(n):
+            for chunk in embedded_chunks:
                 records.append(
                     {
                         "vector_id": vector_id,
                         "filename": filename,
-                        "chunk": chunks[i],
+                        "chunk": chunk,
                     }
                 )
                 vector_id += 1
