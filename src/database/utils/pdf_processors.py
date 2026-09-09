@@ -2,6 +2,7 @@ import os
 import glob
 import math
 from pathlib import Path
+import re
 
 import numpy as np
 import pandas as pd
@@ -24,7 +25,7 @@ DEFAULT_OPENAI_EMBEDDING_BATCH_TOKENS = (
 
 def _is_noisy_chunk(
     text: str,
-    char_threshold: float = 0.80,
+    char_threshold: float = 0.65,
     ) -> bool:
     """
     Heuristic to detect nonsense chunks consisting mainly of digits/brackets/punctuation.
@@ -34,11 +35,12 @@ def _is_noisy_chunk(
         return True
 
     digits = sum(c.isdigit() for c in text)
-    brackets = sum(c in "[](){}<>/" for c in text)
+    brackets = sum(c in "[](){}<>/\\" for c in text)
     punct = sum(c in string.punctuation for c in text)
+    specials = len(''.join(re.findall(r'[\x80-\x9F].?\b', text)))
     total = len(text)
-    noise_ratio = (digits + brackets + punct) / max(total, 1)
-
+    noise_ratio = (specials + digits + brackets + punct) / max(total, 1)
+    
     return noise_ratio > char_threshold
 
 
@@ -143,7 +145,7 @@ def _embed_chunks_openai(
         )
         batch_embeddings = _embed_batch_openai(client, batch, model_name)
 
-        embedded_chunks = embedded_chunks.extend(batch)
+        embedded_chunks.extend(batch)
         embeddings.extend(batch_embeddings)
 
     return embedded_chunks, np.array(embeddings, dtype="float32")
